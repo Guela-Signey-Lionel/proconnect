@@ -1,0 +1,11 @@
+spring:
+  jpa:
+    show-sql: false
+
+server:
+  forward-headers-strategy: native
+
+logging:
+  level:
+    root: WARN
+    com.entreprise.proconnect: INFO

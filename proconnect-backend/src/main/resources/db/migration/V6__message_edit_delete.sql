@@ -1,0 +1,5 @@
+-- Édition et suppression douce des messages.
+ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS is_edited BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP WITH TIME ZONE,
+    ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;

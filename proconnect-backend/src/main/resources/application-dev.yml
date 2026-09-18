@@ -1,0 +1,14 @@
+spring:
+  datasource:
+    # Infra docker compose : le 5432 de l'hôte est occupé par le PostgreSQL système,
+    # le Postgres du projet est publié sur 5434 (voir docker-compose.yml).
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5434/proconnect-db}
+  jpa:
+    show-sql: true
+  devtools:
+    restart:
+      enabled: true
+
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
