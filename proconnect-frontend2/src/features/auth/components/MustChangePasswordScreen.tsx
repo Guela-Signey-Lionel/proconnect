@@ -10,7 +10,7 @@ import { authApi } from '@/lib/api-services';
 
 /**
  * Écran bloquant affiché quand le serveur a posé mustChangePassword=true
- * (compte Superadmin créé par bootstrap, par exemple). L'utilisateur doit
+ * (compte créé avec un mot de passe temporaire, par exemple). L'utilisateur doit
  * définir un nouveau mot de passe avant d'accéder à l'application.
  */
 export function MustChangePasswordScreen() {

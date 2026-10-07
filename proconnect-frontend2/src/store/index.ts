@@ -27,113 +27,13 @@ export { useAuthStore } from './auth-store';
 /* =================== Accès espace d'administration ======================== */
 
 /**
- * Gate de l'espace d'administration : il exige une connexion dédiée avec les
- * identifiants du compte Superadmin, même si l'utilisateur est déjà connecté
- * avec un compte ADMIN. Le déverrouillage vit en mémoire + sessionStorage :
- * il expire avec l'onglet et n'est pas lié au token applicatif.
+ * Gate de l'espace d'administration : aucun compte préconfiguré n'existe plus.
+ * Le premier ADMIN est créé via POST /api/v1/admin/bootstrap/ ; l'accès au
+ * back-office se fait ensuite avec la session classique d'un compte ADMIN ou
+ * MODERATOR (droits vérifiés côté serveur, endpoint par endpoint).
  */
-/** Jetons de la session classique, sauvegardés le temps de l'élévation Superadmin. */
-const ADMIN_PREV_TOKENS_KEY = 'pc_admin_prev_tokens';
-
-interface AdminAuthSession {
-  user: User;
-  /** Vrai juste après le 1er login (mot de passe temporaire à changer). */
-  pendingPasswordChange: boolean;
-}
-
-interface AdminAuthStore {
-  /** null = verrouillé → l'écran de connexion superadmin doit s'afficher. */
-  session: AdminAuthSession | null;
-  /**
-   * Connecte le compte Superadmin (identifiants vérifiés par le serveur, rôle
-   * SUPERADMIN exigé) et élève la session applicative vers ce compte.
-   * Retourne 'ok' | 'mustChangePassword' | 'error'.
-   */
-  unlock: (email: string, password: string) => Promise<'ok' | 'mustChangePassword' | 'error'>;
-  /** Confirme le changement de mot de passe au premier login Superadmin. */
-  completePasswordChange: (newPassword: string) => Promise<void>;
-  /**
-   * Verrouille l'espace admin et restaure la session utilisateur précédente
-   * (celle d'avant l'élévation Superadmin).
-   */
-  lock: () => void;
-}
-
-function savePreviousTokens(): void {
-  if (typeof window === 'undefined') return;
-  const at = getAccessToken();
-  const rt = getRefreshToken();
-  if (at || rt) {
-    try { sessionStorage.setItem(ADMIN_PREV_TOKENS_KEY, JSON.stringify({ at, rt })); } catch { /* ignore */ }
-  }
-}
-
-function restorePreviousTokens(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const raw = sessionStorage.getItem(ADMIN_PREV_TOKENS_KEY);
-    sessionStorage.removeItem(ADMIN_PREV_TOKENS_KEY);
-    if (!raw) return false;
-    const { at, rt } = JSON.parse(raw) as { at?: string | null; rt?: string | null };
-    if (!at) return false;
-    setTokens(at, rt ?? undefined);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export const useAdminAuthStore = create<AdminAuthStore>((set) => ({
-  session: null,
-
-  unlock: async (email, password) => {
-    try {
-      const tokens = await authApi.login(email.trim(), password);
-      // Sauvegarde de la session classique, PUIS pose des tokens superadmin :
-      // `me()` doit être appelé avec le jeton du compte qui vient de se
-      // connecter, sinon la vérification du rôle porte sur l'ancienne session.
-      savePreviousTokens();
-      setTokens(tokens.accessToken, tokens.refreshToken);
-      const me = await authApi.me();
-      if (me.role !== 'SUPERADMIN') {
-        // Identifiants valides mais ce n'est pas le compte superadmin : refus.
-        // On restaure la session précédente (rollback propre), sinon on reste
-        // avec les tokens du compte refusé posés dans le localStorage.
-        if (!restorePreviousTokens()) clearTokens();
-        return 'error';
-      }
-      const user = userFromResponse(me, tokens.mustChangePassword);
-      if (user.mustChangePassword) {
-        // Premier login (mot de passe temporaire) : les tokens restent posés
-        // (requis pour changer le mot de passe) mais la session applicative
-        // n'est PAS encore élevée — le changement se fait dans l'écran admin.
-        return 'mustChangePassword';
-      }
-      useAuthStore.getState().adoptSession(user);
-      set({ session: { user, pendingPasswordChange: false } });
-      return 'ok';
-    } catch {
-      return 'error';
-    }
-  },
-
-  completePasswordChange: async (newPassword) => {
-    // Les tokens superadmin sont déjà posés (1er login) : on change le mot de
-    // passe, puis on élève la session applicative vers le compte Superadmin.
-    await authApi.changePassword('', newPassword);
-    const me = await authApi.me();
-    const user = userFromResponse(me);
-    useAuthStore.getState().adoptSession(user);
-    set({ session: { user, pendingPasswordChange: false } });
-  },
-
-  lock: () => {
-    set({ session: null });
-    // Restaure la session utilisateur d'origine (avant l'élévation Superadmin).
-    if (restorePreviousTokens()) {
-      useAuthStore.getState().bootstrap();
-    }
-  },
+export const useAdminAuthStore = create<{ firstAdminCreated: boolean }>(() => ({
+  firstAdminCreated: false,
 }));
 
 /* ================================= Feed =================================== */

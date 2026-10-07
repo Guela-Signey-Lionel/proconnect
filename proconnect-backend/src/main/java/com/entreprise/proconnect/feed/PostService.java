@@ -1,6 +1,7 @@
 package com.entreprise.proconnect.feed;
 
 import com.entreprise.proconnect.accounts.User;
+import com.entreprise.proconnect.accounts.UserGuard;
 import com.entreprise.proconnect.common.FileValidationUtils;
 import com.entreprise.proconnect.common.exception.BusinessRuleException;
 import com.entreprise.proconnect.common.exception.ResourceNotFoundException;
@@ -69,6 +70,8 @@ public class PostService {
 
     @Transactional
     public Post create(User author, PostCreateRequest request) {
+        // Un compte suspendu ou banni ne peut plus publier (même JWT encore valide).
+        UserGuard.assertCanInteract(author);
         Post post = Post.builder()
                 .author(author)
                 .content(request.content())

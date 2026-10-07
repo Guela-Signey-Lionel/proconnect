@@ -39,7 +39,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     java.util.List<User> findByActiveTrue();
 
     @Query(
-            """ 
+            """
             SELECT u FROM User u
             WHERE LOWER(u.email) LIKE LOWER(CONCAT('%', :search, '%'))
                OR LOWER(u.firstName) LIKE LOWER(CONCAT('%', :search, '%'))
@@ -51,6 +51,12 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     long countByStatus(UserStatus status);
 
     long countByStatusNot(UserStatus status);
+
+    long countByStatusNotAndRoleNot(UserStatus status, Role role);
+
+    long countByRole(Role role);
+
+    long countByRoleAndStatusNot(Role role, UserStatus status);
 
     long countByCreatedAtAfter(Instant after);
 

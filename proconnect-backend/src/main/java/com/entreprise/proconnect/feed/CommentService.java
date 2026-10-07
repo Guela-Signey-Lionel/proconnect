@@ -1,6 +1,7 @@
 package com.entreprise.proconnect.feed;
 
 import com.entreprise.proconnect.accounts.User;
+import com.entreprise.proconnect.accounts.UserGuard;
 import com.entreprise.proconnect.common.exception.BusinessRuleException;
 import com.entreprise.proconnect.common.exception.ResourceNotFoundException;
 import com.entreprise.proconnect.feed.dto.CommentCreateRequest;
@@ -26,7 +27,8 @@ public class CommentService {
     }
 
     public Page<Comment> list(UUID postId, Pageable pageable) {
-        return commentRepository.findByPostIdOrderByCreatedAtAsc(postId, pageable);
+        // Les commentaires masqués (modération) ne sont jamais servis dans le fil.
+        return commentRepository.findByPostIdAndHiddenFalseOrderByCreatedAtAsc(postId, pageable);
     }
 
     public long repliesCount(UUID commentId) {
@@ -35,6 +37,8 @@ public class CommentService {
 
     @Transactional
     public Comment create(UUID postId, User author, CommentCreateRequest request) {
+        // Un compte suspendu ou banni ne peut plus commenter.
+        UserGuard.assertCanInteract(author);
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new ResourceNotFoundException("Publication introuvable."));
 

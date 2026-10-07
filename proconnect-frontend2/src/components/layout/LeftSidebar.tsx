@@ -75,7 +75,7 @@ export function LeftSidebar() {
 
   if (!currentUser) return null;
 
-  const isAdmin = !!currentUser.isAdmin;
+  const canOpenAdmin = !!currentUser.isAdmin || !!currentUser.isModerator;
 
   return (
     <aside className="hidden md:flex flex-col h-screen sticky top-0 border-r border-border bg-background z-30 w-16 lg:w-60 shrink-0">
@@ -107,8 +107,8 @@ export function LeftSidebar() {
           return <NavButton key={item.page} item={item} isActive={isActive} />;
         })}
 
-        {/* Espace d'administration — visible uniquement des comptes ADMIN / SUPERADMIN */}
-        {isAdmin && (
+        {/* Espace d'administration — visible uniquement des comptes ADMIN / MODERATOR */}
+        {canOpenAdmin && (
           <div className="pt-2 mt-2 border-t border-border">
             <NavButton
               item={{

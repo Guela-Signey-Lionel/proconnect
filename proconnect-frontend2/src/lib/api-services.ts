@@ -8,7 +8,7 @@ import type {
   PageResponse, UserResponse, TokenResponse, ProfileSummary, ProfileDetail,
   Post, Comment, Connection, Conversation, Message, Job, Notification, Skill,
   Experience, Education, Certification, PostAttachment,
-  AdminStats, AdminUserDetail,
+  AdminStats, AdminUserDetail, ModerationPost, ModerationComment, AdminActionEntry,
 } from '@/types';
 import {
   mapPost, mapComment, mapProfileSummary, mapProfileDetail,
@@ -261,6 +261,8 @@ export interface AdminUserFilters {
 }
 
 export const adminApi = {
+  bootstrap: (body: { email: string; password: string; firstName: string; lastName: string }) =>
+    api.post<UserResponse>('/api/v1/admin/bootstrap/', body),
   stats: () => api.get<AdminStats>('/api/v1/admin/stats/'),
   users: (filters: AdminUserFilters = {}, page = 0, size = 20) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
@@ -281,8 +283,52 @@ export const adminApi = {
   /** Ancien toggle conservé pour compatibilité (suspend désormais le compte). */
   setActive: (id: string, active: boolean) =>
     api.patch<UserResponse>(`/api/v1/admin/users/${id}/active/`, { active }),
-  setRole: (id: string, role: 'EMPLOYEE' | 'ADMIN') =>
+  setRole: (id: string, role: 'EMPLOYEE' | 'MODERATOR' | 'ADMIN') =>
     api.patch<UserResponse>(`/api/v1/admin/users/${id}/role/`, { role }),
+  /**
+   * Réinitialise le mot de passe : le serveur génère (ou prend) un mot de passe
+   * temporaire, force son changement à la prochaine connexion et le renvoie
+   * UNE SEULE FOIS pour être communiqué à l'utilisateur via un canal externe.
+   */
+  resetPassword: (id: string, newPassword?: string) =>
+    api.post<{ temporaryPassword: string }>(
+      `/api/v1/admin/users/${id}/reset-password/`,
+      newPassword ? { newPassword } : {}
+    ),
   /** Suppression LOGIQUE côté backend : statut DELETED + anonymisation. */
   deleteUser: (id: string) => api.delete<void>(`/api/v1/admin/users/${id}/`),
+
+  /* ----------------------------- Modération ------------------------------ */
+
+  moderationPosts: (filters: { hidden?: boolean; search?: string } = {}, page = 0, size = 20) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (filters.hidden !== undefined && filters.hidden !== null) params.set('hidden', String(filters.hidden));
+    if (filters.search?.trim()) params.set('search', filters.search.trim());
+    return api.get<PageResponse<ModerationPost>>(`/api/v1/admin/moderation/posts/?${params.toString()}`);
+  },
+  moderationComments: (
+    filters: { hidden?: boolean; postId?: string; search?: string } = {}, page = 0, size = 20
+  ) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (filters.hidden !== undefined && filters.hidden !== null) params.set('hidden', String(filters.hidden));
+    if (filters.postId) params.set('postId', filters.postId);
+    if (filters.search?.trim()) params.set('search', filters.search.trim());
+    return api.get<PageResponse<ModerationComment>>(`/api/v1/admin/moderation/comments/?${params.toString()}`);
+  },
+  hidePost: (id: string) => api.post<void>(`/api/v1/admin/moderation/posts/${id}/hide/`),
+  unhidePost: (id: string) => api.post<void>(`/api/v1/admin/moderation/posts/${id}/unhide/`),
+  deleteModerationPost: (id: string) => api.delete<void>(`/api/v1/admin/moderation/posts/${id}/`),
+  hideComment: (id: string) => api.post<void>(`/api/v1/admin/moderation/comments/${id}/hide/`),
+  unhideComment: (id: string) => api.post<void>(`/api/v1/admin/moderation/comments/${id}/unhide/`),
+  deleteModerationComment: (id: string) => api.delete<void>(`/api/v1/admin/moderation/comments/${id}/`),
+
+  /* ------------------------------- Journal ------------------------------- */
+
+  actions: (filters: { actorId?: string; targetUserId?: string; actionType?: string } = {}, page = 0, size = 30) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (filters.actorId) params.set('actorId', filters.actorId);
+    if (filters.targetUserId) params.set('targetUserId', filters.targetUserId);
+    if (filters.actionType) params.set('actionType', filters.actionType);
+    return api.get<PageResponse<AdminActionEntry>>(`/api/v1/admin/actions/?${params.toString()}`);
+  },
 };

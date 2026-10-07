@@ -38,4 +38,13 @@ public class Comment extends BaseEntity {
     private String content;
 
     private String sticker;
+
+    /**
+     * Modération : commentaire masqué du fil (cahier des charges — section
+     * modération). Les données sont conservées pour l'historique et le
+     * déréférencement est réversible (voir AdminModerationService).
+     */
+    @Column(nullable = false)
+    @lombok.Builder.Default
+    private boolean hidden = false;
 }

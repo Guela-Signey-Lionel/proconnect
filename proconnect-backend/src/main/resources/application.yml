@@ -73,14 +73,11 @@ springdoc:
     url: /v3/api-docs
 
 proconnect:
-  # Compte Superadmin créé au démarrage s'il n'existe pas (SuperadminBootstrap).
-  # En production, définissez ces variables d'environnement sur le serveur —
-  # jamais dans le code ni dans Git.
+  # Aucun compte d'administration préconfiguré : le PREMIER admin est créé via
+  # POST /api/v1/admin/bootstrap/ (ouvert tant qu'aucun admin n'existe), les
+  # suivants sont promus depuis le back-office par un ADMIN connecté.
   admin-bootstrap:
-    email: ${ADMIN_BOOTSTRAP_EMAIL:superadmin@proconnect.com}
-    password: ${ADMIN_BOOTSTRAP_PASSWORD:Superad2026}
-    first-name: ${ADMIN_BOOTSTRAP_FIRST_NAME:Super}
-    last-name: ${ADMIN_BOOTSTRAP_LAST_NAME:Admin}
+    enabled: false
 
   jwt:
     secret: ${JWT_SECRET:change-me-to-a-long-random-secret-value-in-production}

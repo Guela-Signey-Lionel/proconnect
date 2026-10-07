@@ -5,7 +5,9 @@ import com.entreprise.proconnect.accounts.dto.AdminUserDetailResponse;
 import com.entreprise.proconnect.accounts.dto.WarningRequest;
 import com.entreprise.proconnect.common.exception.BusinessRuleException;
 import com.entreprise.proconnect.common.exception.ResourceNotFoundException;
+import com.entreprise.proconnect.feed.Comment;
 import com.entreprise.proconnect.feed.CommentRepository;
+import com.entreprise.proconnect.feed.Post;
 import com.entreprise.proconnect.feed.PostRepository;
 import com.entreprise.proconnect.messaging.MessageRepository;
 import com.entreprise.proconnect.notifications.NotificationService;
@@ -27,10 +29,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Actions Superadmin sur les comptes (cahier des charges, section 3) :
- * listing paginé/filtré, détail, avertissement (notification + email, historisé),
- * suspension/réactivation, bannissement, suppression LOGIQUE anonymisée,
- * changement de rôle et statistiques.
+ * Actions d'administration sur les comptes (cahier des charges, section 3) : listing
+ * paginé/filtré, détail, avertissement (notification + email, historisé), suspension/
+ * réactivation, bannissement, suppression LOGIQUE anonymisée, changement de rôle,
+ * réinitialisation de mot de passe et statistiques. Chaque action est historisée dans
+ * le journal (AdminAction).
  */
 @Service
 @Slf4j
@@ -39,6 +42,7 @@ public class AdminService {
     private final UserRepository userRepository;
     private final ProfileRepository profileRepository;
     private final AdminWarningRepository warningRepository;
+    private final AdminActionRepository actionRepository;
     private final PostRepository postRepository;
     private final CommentRepository commentRepository;
     private final MessageRepository messageRepository;
@@ -50,6 +54,7 @@ public class AdminService {
             UserRepository userRepository,
             ProfileRepository profileRepository,
             AdminWarningRepository warningRepository,
+            AdminActionRepository actionRepository,
             PostRepository postRepository,
             CommentRepository commentRepository,
             MessageRepository messageRepository,
@@ -60,12 +65,53 @@ public class AdminService {
         this.userRepository = userRepository;
         this.profileRepository = profileRepository;
         this.warningRepository = warningRepository;
+        this.actionRepository = actionRepository;
         this.postRepository = postRepository;
         this.commentRepository = commentRepository;
         this.messageRepository = messageRepository;
         this.notificationService = notificationService;
         this.mailSender = mailSender;
         this.passwordEncoder = passwordEncoder;
+    }
+
+    /* -------------------------- Création Admin ----------------------------- */
+
+    /**
+     * Porte d'entrée du back-office quand la base est vierge : crée le PREMIER
+     * compte ADMIN (aucun identifiant préconfiguré n'existe plus). Si un admin
+     * existe déjà, l'endpoint refuse et renvoie vers la gestion des rôles depuis
+     * une session ADMIN existante — la route ne permet jamais de créer un
+     * second compte sans être admin.
+     */
+    @Transactional
+    public User createAdmin(com.entreprise.proconnect.accounts.dto.AdminCreateRequest request) {
+        if (userRepository.countByRole(Role.ADMIN) > 0) {
+            throw new BusinessRuleException(
+                    "Un administrateur existe déjà : connectez-vous avec un compte ADMIN "
+                    + "pour promouvoir d'autres comptes depuis le back-office.");
+        }
+        String email = request.email().trim().toLowerCase();
+        if (userRepository.existsByEmail(email)) {
+            throw new BusinessRuleException("Un compte existe déjà avec cet email.");
+        }
+        User admin = userRepository.save(
+                User.builder()
+                        .email(email)
+                        .password(passwordEncoder.encode(request.password()))
+                        .firstName(request.firstName().trim())
+                        .lastName(request.lastName().trim())
+                        .role(Role.ADMIN)
+                        .staff(true)
+                        .active(true)
+                        .status(UserStatus.ACTIVE)
+                        .build()
+        );
+        profileRepository.save(com.entreprise.proconnect.profiles.Profile.builder()
+                .user(admin)
+                .jobTitle("Administrateur")
+                .build());
+        log.info("Premier compte ADMIN créé pour {} (bootstrap back-office).", email);
+        return admin;
     }
 
     /* ----------------------------- Listing -------------------------------- */
@@ -112,7 +158,7 @@ public class AdminService {
     public AdminWarning warn(User admin, UUID userId, WarningRequest request) {
         User target = getUserEntity(userId);
         if (target.isAdmin()) {
-            throw new BusinessRuleException("On n'avertit pas un compte administrateur.");
+            throw new BusinessRuleException("On n'avertit pas un compte d'administration.");
         }
         AdminWarning warning = warningRepository.save(
                 AdminWarning.builder()
@@ -126,6 +172,9 @@ public class AdminService {
         String text = "Avertissement de l'administration : " + request.reason();
         notificationService.notify(target, admin, NotificationType.MENTION, warning.getId(), text);
         dispatchWarningEmail(target.getEmail(), target.getFirstName(), request.reason(), request.message());
+
+        logAdminAction(admin, AdminActionType.WARN, target, warning.getId(),
+                "Avertissement envoyé — motif : " + request.reason());
 
         log.info("Admin {} a averti l'utilisateur {} (motif : {})", admin.getEmail(), target.getEmail(), request.reason());
         return warning;
@@ -156,37 +205,43 @@ public class AdminService {
 
     /** Suspend : l'utilisateur ne peut plus se connecter, ses données sont conservées. */
     @Transactional
-    public User suspend(UUID id) {
+    public User suspend(User admin, UUID id) {
         User user = getUserEntity(id);
         if (user.isAdmin()) {
-            throw new BusinessRuleException("Impossible de suspendre un compte administrateur.");
+            throw new BusinessRuleException("Impossible de suspendre un compte d'administration.");
         }
         user.setStatus(UserStatus.SUSPENDED);
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        logAdminAction(admin, AdminActionType.SUSPEND, user, null, "Compte suspendu");
+        return saved;
     }
 
     /** Réactive un compte suspendu (ou lève un bannissement, décision métier explicite). */
     @Transactional
-    public User reactivate(UUID id) {
+    public User reactivate(User admin, UUID id) {
         User user = getUserEntity(id);
         if (user.getStatus() == UserStatus.DELETED) {
             throw new BusinessRuleException("Un compte supprimé ne peut pas être réactivé.");
         }
         user.setStatus(UserStatus.ACTIVE);
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        logAdminAction(admin, AdminActionType.REACTIVATE, user, null, "Compte réactivé");
+        return saved;
     }
 
     /* ------------------------------ Bannir -------------------------------- */
 
     /** Bannit durablement : connexion définitivement bloquée, données conservées. */
     @Transactional
-    public User ban(UUID id) {
+    public User ban(User admin, UUID id) {
         User user = getUserEntity(id);
         if (user.isAdmin()) {
-            throw new BusinessRuleException("Impossible de bannir un compte administrateur.");
+            throw new BusinessRuleException("Impossible de bannir un compte d'administration.");
         }
         user.setStatus(UserStatus.BANNED);
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        logAdminAction(admin, AdminActionType.BAN, user, null, "Compte banni définitivement");
+        return saved;
     }
 
     /* ------------------------ Suppression logique ------------------------- */
@@ -204,10 +259,21 @@ public class AdminService {
         }
         User user = getUserEntity(id);
         if (user.isAdmin()) {
-            throw new BusinessRuleException("Impossible de supprimer un compte administrateur.");
+            throw new BusinessRuleException("Impossible de supprimer un compte d'administration.");
         }
+        String emailBefore = user.getEmail();
         anonymizeAndMarkDeleted(user);
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        // Journal APRÈS anonymisation : la cible est déjà anonymisée, on journalise
+        // le compte visé d'origine pour une trace lisible.
+        AdminAction entry = AdminAction.builder()
+                .actor(admin)
+                .targetUser(saved)
+                .actionType(AdminActionType.SOFT_DELETE)
+                .description("Compte supprimé (logique) — identités anonymisées; e-mail avant suppression : " + emailBefore)
+                .build();
+        actionRepository.save(entry);
+        return saved;
     }
 
     /** Anonymisation RGPD-style : toutes les données personnelles sont écrasées. */
@@ -235,26 +301,75 @@ public class AdminService {
     /* ----------------------------- Rôles ---------------------------------- */
 
     /**
-     * Change le rôle d'un compte. Seul le SUPERADMIN peut monter un EMPLOYEE en
-     * ADMIN ou retirer un rôle ADMIN — conformément au périmètre défini.
+     * Change le rôle d'un compte : EMPLOYEE, MODERATOR ou ADMIN. Réservé aux
+     * comptes ADMIN (l'accent MODERATOR n'a pas accès à cette fonction).
      */
     @Transactional
     public User changeRole(User actor, UUID id, Role newRole) {
-        User user = getUserEntity(id);
-        if (user.getRole() == Role.SUPERADMIN) {
-            throw new BusinessRuleException("Le rôle d'un super administrateur ne peut pas être modifié.");
-        }
-        if (newRole == Role.SUPERADMIN) {
-            throw new BusinessRuleException("Aucun compte ne peut être promu SUPERADMIN (compte technique de bootstrap).");
-        }
         if (actor.getId().equals(id)) {
             throw new BusinessRuleException("Un administrateur ne peut pas modifier son propre rôle.");
         }
+        User user = getUserEntity(id);
         user.setRole(newRole);
-        if (newRole == Role.ADMIN) {
-            user.setStaff(true);
+        user.setStaff(newRole != Role.EMPLOYEE);
+        User saved = userRepository.save(user);
+        String description = "Rôle : " + newRole.name();
+        logAdminAction(actor, AdminActionType.ROLE_CHANGE, saved, null, description);
+        return saved;
+    }
+
+    /* ------------------------- Réinitialisation MDP ----------------------- */
+
+    /**
+     * Réinitialisation administrative du mot de passe : pose un mot de passe
+     * TEMPORAIRE et force son changement à la prochaine connexion
+     * (mustChangePassword=true), comme l'exige le cahier des charges.
+     */
+    @Transactional
+    public String resetPassword(User admin, UUID id, String newPassword) {
+        User user = getUserEntity(id);
+        // Mot de passe fourni par l'admin ou généré côté serveur (jamais de null).
+        String password = (newPassword == null || newPassword.isBlank())
+                ? generateTemporaryPassword()
+                : newPassword;
+        user.setPassword(passwordEncoder.encode(password));
+        user.setMustChangePassword(true);
+        User saved = userRepository.save(user);
+        logAdminAction(admin, AdminActionType.PASSWORD_RESET, saved, null,
+                "Mot de passe réinitialisé par l'administration (changement forcé à la prochaine connexion)");
+        dispatchResetEmail(saved.getEmail(), saved.getFirstName());
+        return password;
+    }
+
+    /** Mot de passe temporaire lisible : 14 caractères sans caractères ambigus (0/O, 1/l/I). */
+    private static String generateTemporaryPassword() {
+        String alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder(14);
+        for (int i = 0; i < 14; i++) {
+            sb.append(alphabet.charAt(random.nextInt(alphabet.length())));
         }
-        return userRepository.save(user);
+        return sb.toString();
+    }
+
+    @Async
+    public void dispatchResetEmail(String toEmail, String firstName) {
+        try {
+            SimpleMailMessage mail = new SimpleMailMessage();
+            mail.setTo(toEmail);
+            mail.setSubject("Votre mot de passe ProConnect a été réinitialisé");
+            mail.setText(
+                    "Bonjour " + firstName + ",\n\n"
+                    + "L'administration a réinitialisé votre mot de passe. Un mot de passe\n"
+                    + "temporaire vous a été communiqué — il DOIT être changé à votre prochaine\n"
+                    + "connexion.\n\n"
+                    + "L'administration ProConnect"
+            );
+            mailSender.send(mail);
+        } catch (Exception ex) {
+            // SMTP absent ou mal configuré : le flag mustChangePassword reste posé.
+            log.warn("Échec de l'envoi de l'email de réinitialisation à {}", toEmail, ex);
+        }
     }
 
     /* --------------------------- Statistiques ----------------------------- */
@@ -269,7 +384,31 @@ public class AdminService {
         long new7d = userRepository.countByCreatedAtAfter(startOfDay(LocalDate.now().minusDays(7)));
         long new30d = userRepository.countByCreatedAtAfter(startOfDay(LocalDate.now().minusDays(30)));
         long activeNow = userRepository.countByLastSeenAtAfter(Instant.now().minusSeconds(120));
-        return new AdminStatsResponse(total, newToday, new7d, new30d, suspended, banned, deleted, activeNow);
+        long moderators = userRepository.countByRoleAndStatusNot(Role.MODERATOR, UserStatus.DELETED);
+        long admins = userRepository.countByRoleAndStatusNot(Role.ADMIN, UserStatus.DELETED);
+        long hiddenPosts = postRepository.countByHiddenTrue();
+        long hiddenComments = commentRepository.countByHiddenTrue();
+        return new AdminStatsResponse(total, newToday, new7d, new30d, suspended, banned, deleted, activeNow,
+                moderators, admins, hiddenPosts, hiddenComments);
+    }
+
+    /* ------------------------------- Journal ------------------------------- */
+
+    /** Persiste une entrée du journal des actions (échoue silencieusement pour ne pas bloquer l'action métier). */
+    private void logAdminAction(User actor, AdminActionType type, User target, UUID objectId, String description) {
+        try {
+            actionRepository.save(AdminAction.builder()
+                    .actor(actor)
+                    .targetUser(target)
+                    .actionType(type)
+                    .objectId(objectId)
+                    .description(description != null && description.length() > 1000
+                            ? description.substring(0, 1000)
+                            : description)
+                    .build());
+        } catch (Exception ex) {
+            log.warn("Impossible d'enregistrer l'action {} dans le journal", type, ex);
+        }
     }
 
     /* ---------------------------- Utilitaires ----------------------------- */

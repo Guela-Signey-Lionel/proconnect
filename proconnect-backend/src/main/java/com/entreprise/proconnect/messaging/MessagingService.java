@@ -234,6 +234,8 @@ public class MessagingService {
             String attachmentType, String attachmentName, Long attachmentSize
     ) {
         assertParticipant(conversationId, sender);
+        // Un compte suspendu ou banni ne peut plus envoyer de messages.
+        com.entreprise.proconnect.accounts.UserGuard.assertCanInteract(sender);
         if ((content == null || content.isBlank()) && (attachmentUrl == null || attachmentUrl.isBlank())) {
             throw new BusinessRuleException("Un message doit contenir du texte ou une pièce jointe.");
         }

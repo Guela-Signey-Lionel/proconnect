@@ -8,7 +8,7 @@ import { MobileNav } from '@/components/layout/MobileNav';
 import { RightSidebar } from '@/components/layout/RightSidebar';
 import { AuthPage } from '@/features/auth/components';
 import { MustChangePasswordScreen } from '@/features/auth/components/MustChangePasswordScreen';
-import { SuperadminLoginPage } from '@/features/auth/components/SuperadminLoginPage';
+import { AdminAccessGate } from '@/features/auth/components/AdminAccessGate';
 import { FeedList } from '@/features/feed';
 import { ProfilePage } from '@/features/profile';
 import { NetworkPage } from '@/features/network';
@@ -18,7 +18,7 @@ import { NotificationsPage } from '@/features/notifications';
 import { SearchPage } from '@/features/search';
 import { SettingsPage } from '@/features/settings';
 import { AdminPage } from '@/features/admin';
-import { useNavigationStore, useAuthStore, usePreferencesStore, useAdminAuthStore } from '@/store';
+import { useNavigationStore, useAuthStore, usePreferencesStore } from '@/store';
 import { THEME_PRESETS, BACKGROUND_PRESETS, applyThemePreset, applyBackgroundPreset } from '@/lib/theme-presets';
 import { usePresenceHeartbeat } from '@/hooks/use-presence';
 
@@ -34,7 +34,7 @@ export default function Home() {
   const themeColorPreset = usePreferencesStore((s) => s.themeColorPreset);
   const backgroundPreset = usePreferencesStore((s) => s.backgroundPreset);
   const darkMode = usePreferencesStore((s) => s.darkMode);
-  const adminUnlocked = useAdminAuthStore((s) => s.session !== null);
+  const canOpenAdmin = !!currentUser && (currentUser.isAdmin || currentUser.isModerator);
 
   // Restaure la session (JWT stocké) + les préférences au premier montage.
   useEffect(() => {
@@ -85,17 +85,17 @@ export default function Home() {
     return <AuthPage />;
   }
 
-  // Changement de mot de passe forcé (compte bootstrap Superadmin, p. ex.) :
+  // Changement de mot de passe forcé (compte créé avec un mot de passe temporaire) :
   // écran bloquant tant que l'utilisateur n'a pas défini un nouveau mot de passe.
   if (currentUser?.mustChangePassword) {
     return <MustChangePasswordScreen />;
   }
 
-  // Porte d'entrée de l'espace d'administration : une connexion dédiée avec les
-  // identifiants Superadmin est exigée AVANT d'afficher l'interface admin —
-  // cliquer sur « Administration » ne suffit pas.
-  if (currentPage === 'admin' && !adminUnlocked) {
-    return <SuperadminLoginPage />;
+  // Porte d'entrée du back-office : réservé aux comptes ADMIN / MODERATOR
+  // (droits vérifiés côté serveur sur chaque endpoint). Si aucun admin n'existe
+  // encore, le premier se crée via POST /api/v1/admin/bootstrap/.
+  if (currentPage === 'admin' && !canOpenAdmin) {
+    return <AdminAccessGate />;
   }
 
   const isMessaging = currentPage === 'messaging';

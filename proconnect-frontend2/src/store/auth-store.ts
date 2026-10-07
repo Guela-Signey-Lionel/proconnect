@@ -17,8 +17,8 @@ export function userFromResponse(u: UserResponse, mustChangePassword?: boolean):
     role: u.role,
     active: u.active,
     mustChangePassword: mustChangePassword ?? u.mustChangePassword ?? false,
-    isAdmin: u.role === 'ADMIN' || u.role === 'SUPERADMIN',
-    isSuperAdmin: u.role === 'SUPERADMIN',
+    isAdmin: u.role === 'ADMIN',
+    isModerator: u.role === 'MODERATOR',
   } as User;
 }
 
@@ -39,7 +39,8 @@ interface AuthStore {
   refreshCurrentUser: () => Promise<void>;
   /**
    * Remplace la session courante par celle d'un utilisateur déjà authentifié
-   * (élévation vers le compte Superadmin depuis l'écran de connexion admin).
+   * (reprise de session d'un compte déjà authentifié, p. ex. après un reset
+   * de mot de passe administrateur).
    */
   adoptSession: (user: User, tokens?: { accessToken: string; refreshToken: string }) => void;
 }

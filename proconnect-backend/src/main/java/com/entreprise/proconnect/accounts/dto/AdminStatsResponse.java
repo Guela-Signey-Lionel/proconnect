@@ -1,6 +1,6 @@
 package com.entreprise.proconnect.accounts.dto;
 
-/** Statistiques de l'espace d'administration. */
+/** Statistiques de l'espace d'administration (utilisateurs + modération). */
 public record AdminStatsResponse(
         long totalUsers,
         long newToday,
@@ -9,6 +9,10 @@ public record AdminStatsResponse(
         long suspendedAccounts,
         long bannedAccounts,
         long deletedAccounts,
-        long onlineNow
+        long onlineNow,
+        long moderatorCount,
+        long adminCount,
+        long hiddenPosts,
+        long hiddenComments
 ) {
 }

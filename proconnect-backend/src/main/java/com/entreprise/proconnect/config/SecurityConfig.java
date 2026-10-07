@@ -74,6 +74,9 @@ public class SecurityConfig {
                                 "/api/v1/auth/refresh/**",
                                 "/api/v1/auth/password-reset/**",
                                 "/api/v1/auth/password-reset-confirm/**",
+                                // Bootstrap du back-office : création du PREMIER admin
+                                // (refusée par le service dès qu'un admin existe).
+                                "/api/v1/admin/bootstrap/**",
                                 "/ws/**",
                                 "/api/docs/**",
                                 "/api/swagger-ui/**",

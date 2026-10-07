@@ -83,14 +83,14 @@ export interface User {
   location?: string;
   bio?: string;
   company?: string;
-  role?: 'EMPLOYEE' | 'ADMIN' | 'SUPERADMIN';
+  role?: 'EMPLOYEE' | 'MODERATOR' | 'ADMIN';
   active?: boolean;
   /** Le serveur exige un changement de mot de passe à cette session. */
   mustChangePassword?: boolean;
-  /** Droits d'administration (ADMIN ou SUPERADMIN). */
+  /** Droits d'administration complets (gestion des comptes + modération). */
   isAdmin?: boolean;
-  /** SUPERADMIN : peut en plus gérer les rôles d'administrateurs. */
-  isSuperAdmin?: boolean;
+  /** MODERATOR : accès limité au panneau de modération. */
+  isModerator?: boolean;
   /** Utilisateur actuellement en ligne (heartbeat de moins de 2 min). */
   online?: boolean;
 }
@@ -253,7 +253,7 @@ export interface UserResponse {
   email: string;
   firstName: string;
   lastName: string;
-  role: 'EMPLOYEE' | 'ADMIN' | 'SUPERADMIN';
+  role: 'EMPLOYEE' | 'MODERATOR' | 'ADMIN';
   active: boolean;
   status?: UserAccountStatus;
   mustChangePassword?: boolean;
@@ -263,6 +263,8 @@ export interface UserResponse {
 }
 
 /* --------------------------- Administration ------------------------------ */
+
+export type AdminRole = 'EMPLOYEE' | 'MODERATOR' | 'ADMIN';
 
 export interface AdminWarning {
   id: string;
@@ -280,7 +282,7 @@ export interface AdminUserDetail {
   firstName: string;
   lastName: string;
   fullName: string;
-  role: 'EMPLOYEE' | 'ADMIN' | 'SUPERADMIN';
+  role: AdminRole;
   status: UserAccountStatus;
   active: boolean;
   mustChangePassword: boolean;
@@ -308,4 +310,54 @@ export interface AdminStats {
   bannedAccounts: number;
   deletedAccounts: number;
   onlineNow: number;
+  moderatorCount: number;
+  adminCount: number;
+  hiddenPosts: number;
+  hiddenComments: number;
+}
+
+/* ------------------------- Modération de contenu -------------------------- */
+
+/** Publication vue depuis l'onglet Modération (inclut le statut de masquage). */
+export interface ModerationPost {
+  id: string;
+  author: { id: string; fullName: string; email: string };
+  content: string | null;
+  postType: 'TEXT' | 'IMAGE' | 'DOCUMENT' | 'VIDEO' | 'MIXED';
+  hidden: boolean;
+  attachments: PostAttachment[];
+  visibleCommentsCount: number;
+  createdAt: string;
+}
+
+/** Commentaire vu depuis l'onglet Modération. */
+export interface ModerationComment {
+  id: string;
+  postId: string;
+  postAuthorId: string;
+  parentId: string | null;
+  author: { id: string; fullName: string; email: string };
+  content: string | null;
+  sticker: string | null;
+  hidden: boolean;
+  createdAt: string;
+}
+
+export type AdminActionTypeValue =
+  | 'WARN' | 'SUSPEND' | 'REACTIVATE' | 'BAN' | 'SOFT_DELETE'
+  | 'ROLE_CHANGE' | 'PASSWORD_RESET'
+  | 'HIDE_POST' | 'UNHIDE_POST' | 'DELETE_POST'
+  | 'HIDE_COMMENT' | 'UNHIDE_COMMENT' | 'DELETE_COMMENT';
+
+/** Entrée du journal des actions d'administration (« Qui a fait quoi, quand »). */
+export interface AdminActionEntry {
+  id: string;
+  actionType: AdminActionTypeValue;
+  actorId: string | null;
+  actorName: string | null;
+  targetUserId: string | null;
+  targetUserName: string | null;
+  objectId: string | null;
+  description: string;
+  createdAt: string;
 }

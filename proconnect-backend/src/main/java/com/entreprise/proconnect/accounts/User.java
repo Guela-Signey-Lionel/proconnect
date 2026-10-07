@@ -93,7 +93,16 @@ public class User extends BaseEntity implements UserDetails {
     }
 
     public boolean isAdmin() {
-        return role == Role.ADMIN || role == Role.SUPERADMIN || staff;
+        return role == Role.ADMIN;
+    }
+
+    /**
+     * Peut accéder au back-office (côté serveur) : ADMIN pour tout, MODERATOR
+     * pour la seule modération de contenu (vérifiée endpoint par endpoint via
+     * @PreAuthorize). Le compte doit par ailleurs être actif.
+     */
+    public boolean isStaffMember() {
+        return (role == Role.ADMIN || role == Role.MODERATOR) && isEnabled();
     }
 
     // --- UserDetails ---------------------------------------------------

@@ -4,15 +4,16 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ShieldCheck, ShieldAlert, UserX, ArrowLeft, Search, RefreshCw,
   AlertTriangle, Ban, CheckCircle2, Trash2, ChevronLeft, ChevronRight,
-  Users, UserPlus, Wifi, Loader2, X, Gavel, Activity, UserCog,
-  EllipsisVertical,
+  Users, UserPlus, Wifi, Loader2, Gavel, Activity, UserCog,
+  EllipsisVertical, EyeOff, Eye, FileText, KeyRound, MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { adminApi } from '@/lib/api-services';
 import type {
   AdminStats, AdminUserDetail, AdminWarning, UserAccountStatus, UserResponse,
+  ModerationPost, ModerationComment, AdminActionEntry, AdminRole,
 } from '@/types';
-import { useAuthStore, useNavigationStore, useAdminAuthStore } from '@/store';
+import { useAuthStore, useNavigationStore } from '@/store';
 import { isoDate } from '@/lib/api-mappers';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -40,10 +41,26 @@ const STATUS_META: Record<UserAccountStatus, { label: string; badge: string }> =
   DELETED: { label: 'Supprimé', badge: 'bg-gray-100 text-gray-500 border-gray-200' },
 };
 
-const ROLE_LABEL: Record<string, string> = {
+const ROLE_LABEL: Record<AdminRole, string> = {
   EMPLOYEE: 'Employé',
+  MODERATOR: 'Modérateur',
   ADMIN: 'Admin',
-  SUPERADMIN: 'Superadmin',
+};
+
+const ACTION_LABEL: Record<string, string> = {
+  WARN: 'Avertissement',
+  SUSPEND: 'Suspension',
+  REACTIVATE: 'Réactivation',
+  BAN: 'Bannissement',
+  SOFT_DELETE: 'Suppression de compte',
+  ROLE_CHANGE: 'Changement de rôle',
+  PASSWORD_RESET: 'Réinitialisation MDP',
+  HIDE_POST: 'Publication masquée',
+  UNHIDE_POST: 'Publication restaurée',
+  DELETE_POST: 'Publication supprimée',
+  HIDE_COMMENT: 'Commentaire masqué',
+  UNHIDE_COMMENT: 'Commentaire restauré',
+  DELETE_COMMENT: 'Commentaire supprimé',
 };
 
 function fmtDate(value?: string | null): string {
@@ -72,6 +89,43 @@ function getInitials(first?: string, last?: string): string {
   return `${(first ?? '?').charAt(0)}${(last ?? '').charAt(0)}`.toUpperCase();
 }
 
+/* ============================== Tabs ===================================== */
+
+type AdminTab = 'users' | 'moderation' | 'logs' | 'stats';
+
+function TabsBar({ tab, onTab, isAdmin, stats }: {
+  tab: AdminTab; onTab: (t: AdminTab) => void; isAdmin: boolean; stats: AdminStats | null;
+}) {
+  const items: { id: AdminTab; label: string; icon: React.ReactNode; show: boolean }[] = [
+    { id: 'users', label: 'Utilisateurs', icon: <Users className="size-4" />, show: isAdmin },
+    { id: 'moderation', label: 'Modération', icon: <MessageSquare className="size-4" />, show: true },
+    { id: 'logs', label: 'Journal', icon: <FileText className="size-4" />, show: isAdmin },
+    { id: 'stats', label: 'Statistiques', icon: <Activity className="size-4" />, show: true },
+  ];
+  return (
+    <div className="flex flex-wrap gap-1 rounded-lg bg-muted p-1">
+      {items.filter((i) => i.show).map((item) => (
+        <button
+          key={item.id}
+          onClick={() => onTab(item.id)}
+          className={cn(
+            'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+            tab === item.id ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          {item.icon}
+          {item.label}
+          {item.id === 'moderation' && stats && (stats.hiddenPosts + stats.hiddenComments) > 0 && (
+            <span className="ml-1 rounded-full bg-orange-600 px-1.5 text-[10px] font-semibold text-white">
+              {stats.hiddenPosts + stats.hiddenComments}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* ============================== Stats ==================================== */
 
 function StatCard({
@@ -92,7 +146,14 @@ function StatCard({
   );
 }
 
-function StatsBanner({ stats, onReload }: { stats: AdminStats | null; onReload: () => void }) {
+function StatsView({ stats, onReload, error }: { stats: AdminStats | null; onReload: () => void; error: string }) {
+  if (error) {
+    return (
+      <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600">
+        Statistiques : {error}
+      </div>
+    );
+  }
   if (!stats) {
     return (
       <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -114,6 +175,12 @@ function StatsBanner({ stats, onReload }: { stats: AdminStats | null; onReload: 
         <StatCard icon={<UserX className="size-5 text-white" />} label="Supprimés" value={stats.deletedAccounts} tone="bg-gray-500" />
         <StatCard icon={<Wifi className="size-5 text-white" />} label="En ligne maintenant" value={stats.onlineNow} tone="bg-green-600" />
       </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard icon={<UserCog className="size-5 text-white" />} label="Admins" value={stats.adminCount} tone="bg-indigo-800" />
+        <StatCard icon={<Gavel className="size-5 text-white" />} label="Modérateurs" value={stats.moderatorCount} tone="bg-teal-600" />
+        <StatCard icon={<EyeOff className="size-5 text-white" />} label="Publications masquées" value={stats.hiddenPosts} tone="bg-orange-700" />
+        <StatCard icon={<EyeOff className="size-5 text-white" />} label="Commentaires masqués" value={stats.hiddenComments} tone="bg-rose-700" />
+      </div>
       <div className="flex justify-end">
         <Button variant="outline" size="sm" onClick={onReload} className="gap-1.5">
           <RefreshCw className="size-3.5" /> Actualiser
@@ -123,41 +190,11 @@ function StatsBanner({ stats, onReload }: { stats: AdminStats | null; onReload: 
   );
 }
 
-/* =========================== Filtres ===================================== */
-
-function StatusFilter({
-  value, onChange,
-}: {
-  value: UserAccountStatus | 'ALL';
-  onChange: (v: UserAccountStatus | 'ALL') => void;
-}) {
-  const options: { value: UserAccountStatus | 'ALL'; label: string }[] = [
-    { value: 'ALL', label: 'Tous les statuts' },
-    { value: 'ACTIVE', label: 'Actifs' },
-    { value: 'SUSPENDED', label: 'Suspendus' },
-    { value: 'BANNED', label: 'Bannis' },
-    { value: 'DELETED', label: 'Supprimés' },
-  ];
-  return (
-    <Select value={value} onValueChange={(v) => onChange(v as UserAccountStatus | 'ALL')}>
-      <SelectTrigger className="w-[180px] h-9">
-        <SelectValue placeholder="Statut" />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
-/* ============================ Detail dialog =============================== */
+/* =========================== Détail utilisateur ========================== */
 
 function WarningDialog({
   user, onClose, onSubmitted,
 }: {
-  // Suffisant pour l'envoi (UserResponse de la liste ou AdminUserDetail du détail).
   user: Pick<AdminUserDetail, 'id' | 'firstName' | 'lastName'>;
   onClose: () => void;
   onSubmitted: () => void;
@@ -190,8 +227,8 @@ function WarningDialog({
             <AlertTriangle className="size-5 text-orange-500" /> Avertir {user.firstName} {user.lastName}
           </DialogTitle>
           <DialogDescription>
-            Message officiel conservé dans l&apos;historique du compte. L&apos;utilisateur reçoit
-            une notification in-app et un e-mail.
+            Message officiel conservé dans l&apos;historique du compte et le journal.
+            L&apos;utilisateur reçoit une notification in-app et un e-mail.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -232,15 +269,94 @@ function WarningDialog({
   );
 }
 
-function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void }) {
+function ResetPasswordDialog({
+  user, onClose,
+}: {
+  user: Pick<AdminUserDetail, 'id' | 'firstName' | 'lastName'>;
+  onClose: () => void;
+}) {
+  const [optional, setOptional] = useState('');
+  const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await adminApi.resetPassword(
+        user.id, optional.trim() && optional.trim().length >= 12 ? optional.trim() : undefined
+      );
+      setTempPassword(res.temporaryPassword);
+    } catch (e) {
+      setError((e as Error).message || 'Réinitialisation impossible.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <KeyRound className="size-5 text-sky-600" /> Réinitialiser le mot de passe
+          </DialogTitle>
+          <DialogDescription>
+            {tempPassword
+              ? 'Le mot de passe temporaire doit être communiqué à l\'utilisateur via un canal externe. Il devra le changer à sa prochaine connexion.'
+              : 'Laissez vide pour générer automatiquement un mot de passe temporaire. L\'utilisateur devra le changer à sa prochaine connexion.'}
+          </DialogDescription>
+        </DialogHeader>
+        {!tempPassword ? (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nouveau mot de passe (optionnel, min. 12 caractères)</Label>
+              <Input
+                value={optional}
+                onChange={(e) => setOptional(e.target.value)}
+                placeholder="Généré automatiquement si vide"
+                maxLength={72}
+              />
+            </div>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={onClose}>Annuler</Button>
+              <Button onClick={submit} disabled={loading} className="gap-1.5">
+                {loading ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+                Réinitialiser
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-sky-50 border border-sky-200 p-3">
+              <p className="text-xs text-sky-800 mb-1 font-medium">Mot de passe temporaire (à communiquer à l&apos;utilisateur) :</p>
+              <p className="font-mono text-sm font-bold text-sky-900 break-all select-all">{tempPassword}</p>
+            </div>
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={onClose}>Fermer</Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DetailDialog({
+  userId, onClose, canManageUsers,
+}: {
+  userId: string; onClose: () => void; canManageUsers: boolean;
+}) {
   const [detail, setDetail] = useState<AdminUserDetail | null>(null);
   const [loadError, setLoadError] = useState('');
   const [showWarn, setShowWarn] = useState(false);
+  const [showReset, setShowReset] = useState(false);
   const [confirm, setConfirm] = useState<null | 'suspend' | 'ban' | 'reactivate' | 'delete'>(null);
   const [actionError, setActionError] = useState('');
   const currentUser = useAuthStore((s) => s.currentUser);
-  const isSuperAdmin = !!currentUser?.isSuperAdmin;
-  const [confirmRole, setConfirmRole] = useState<null | 'ADMIN' | 'EMPLOYEE'>(null);
+  const [confirmRole, setConfirmRole] = useState<null | AdminRole>(null);
 
   const load = useCallback(async () => {
     setLoadError('');
@@ -252,9 +368,7 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
     }
   }, [userId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const runAction = async () => {
     if (!confirm || !detail) return;
@@ -275,7 +389,7 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
     }
   };
 
-  const targetIsAdmin = detail ? detail.role === 'ADMIN' || detail.role === 'SUPERADMIN' : false;
+  const targetIsAdmin = detail ? detail.role === 'ADMIN' || detail.role === 'MODERATOR' : false;
   const status = detail?.status ?? 'ACTIVE';
 
   return (
@@ -291,9 +405,7 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
                 </Button>
               </>
             ) : (
-              <>
-                <Loader2 className="size-5 animate-spin" /> Chargement…
-              </>
+              <><Loader2 className="size-5 animate-spin" /> Chargement…</>
             )}
           </div>
         ) : (
@@ -316,7 +428,7 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
             </DialogHeader>
 
             {/* Actions */}
-            {status !== 'DELETED' && (
+            {canManageUsers && status !== 'DELETED' && (
               <div className="flex flex-wrap gap-2">
                 {!targetIsAdmin && (
                   <Button
@@ -334,7 +446,7 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
                     <ShieldAlert className="size-4" /> Suspendre
                   </Button>
                 )}
-                {status === 'SUSPENDED' && (
+                {status !== 'ACTIVE' && (
                   <Button variant="outline" size="sm" onClick={() => setConfirm('reactivate')} className="gap-1.5 border-green-200 text-green-700 hover:bg-green-50">
                     <CheckCircle2 className="size-4" /> Réactiver
                   </Button>
@@ -347,9 +459,12 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
                     <Ban className="size-4" /> Bannir
                   </Button>
                 )}
-                {status === 'BANNED' && (
-                  <Button variant="outline" size="sm" onClick={() => setConfirm('reactivate')} className="gap-1.5 border-green-200 text-green-700 hover:bg-green-50">
-                    <CheckCircle2 className="size-4" /> Lever le bannissement
+                {!targetIsAdmin && (
+                  <Button
+                    variant="outline" size="sm" onClick={() => setShowReset(true)}
+                    className="gap-1.5 border-sky-200 text-sky-700 hover:bg-sky-50"
+                  >
+                    <KeyRound className="size-4" /> Réinitialiser le MDP
                   </Button>
                 )}
                 {!targetIsAdmin && (
@@ -423,7 +538,30 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
               )}
             </div>
 
-            {/* Suppression : confirmation avec rappel de la suppression logique */}
+            {/* Rôles : réservé aux admins, jamais sur soi-même */}
+            {canManageUsers && detail.role !== 'ADMIN' && currentUser?.id !== detail.id && (
+              <div className="rounded-lg border border-border p-4 space-y-3 text-sm">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <UserCog className="size-3.5" /> Rôle du compte
+                </p>
+                <p className="text-muted-foreground">
+                  Rôle actuel : <span className="font-medium text-foreground">{ROLE_LABEL[detail.role] ?? detail.role}</span>
+                  {' — '}MODERATOR accède au panneau de modération ; ADMIN gère en plus les comptes Utilisateurs.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {detail.role !== 'MODERATOR' && (
+                    <Button variant="outline" size="sm" onClick={() => setConfirmRole('MODERATOR')} className="gap-1.5">
+                      <Gavel className="size-4" /> Promouvoir Modérateur
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => setConfirmRole('ADMIN')} className="gap-1.5">
+                    <ShieldCheck className="size-4" /> Promouvoir Admin
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Suppression logique du compte */}
             <AlertDialog open={confirm === 'delete'} onOpenChange={(o) => !o && setConfirm(null)}>
               <AlertDialogContent>
                 <AlertDialogHeader>
@@ -447,30 +585,6 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
               </AlertDialogContent>
             </AlertDialog>
 
-            {/* Rôles : réservé au SUPERADMIN, jamais sur un SUPERADMIN ni soi-même */}
-            {isSuperAdmin && detail.role !== 'SUPERADMIN' && currentUser?.id !== detail.id && (
-              <div className="rounded-lg border border-border p-4 space-y-3 text-sm">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <UserCog className="size-3.5" /> Rôle du compte
-                </p>
-                <p className="text-muted-foreground">
-                  Rôle actuel : <span className="font-medium text-foreground">{ROLE_LABEL[detail.role] ?? detail.role}</span>
-                  {detail.role === 'ADMIN'
-                    ? ' — retirer le rôle rendra ce compte employé standard.'
-                    : ' — promouvoir ce compte lui donnera des droits d\'administration des utilisateurs.'}
-                </p>
-                {detail.role === 'ADMIN' ? (
-                  <Button variant="outline" size="sm" onClick={() => setConfirmRole('EMPLOYEE')} className="gap-1.5">
-                    <UserX className="size-4" /> Retirer le rôle Admin
-                  </Button>
-                ) : (
-                  <Button variant="outline" size="sm" onClick={() => setConfirmRole('ADMIN')} className="gap-1.5">
-                    <ShieldCheck className="size-4" /> Promouvoir Admin
-                  </Button>
-                )}
-              </div>
-            )}
-
             {/* Confirmations suspendre / bannir / réactiver */}
             <AlertDialog
               open={confirm === 'suspend' || confirm === 'ban' || confirm === 'reactivate'}
@@ -484,7 +598,7 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
                     {confirm === 'reactivate' && 'Réactiver ce compte ?'}
                   </AlertDialogTitle>
                   <AlertDialogDescription>
-                    {confirm === 'suspend' && 'L\'utilisateur ne pourra plus se connecter. Ses données sont conservées et le compte est réactivable.'}
+                    {confirm === 'suspend' && 'L\'utilisateur ne pourra plus se connecter ni publier. Ses données sont conservées et le compte est réactivable.'}
                     {confirm === 'ban' && 'L\'utilisateur ne pourra plus jamais se connecter. Ses données sont conservées.'}
                     {confirm === 'reactivate' && 'L\'utilisateur retrouvera l\'accès à son compte.'}
                   </AlertDialogDescription>
@@ -501,12 +615,12 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>
-                    {confirmRole === 'ADMIN' ? 'Promouvoir ce compte Admin ?' : 'Retirer le rôle Admin ?'}
+                    {confirmRole === 'ADMIN' ? 'Promouvoir ce compte Admin ?' : 'Promouvoir ce compte Modérateur ?'}
                   </AlertDialogTitle>
                   <AlertDialogDescription>
                     {confirmRole === 'ADMIN'
-                      ? 'Ce compte pourra gérer les comptes utilisateurs (avertissements, suspensions) depuis l\'espace d\'administration.'
-                      : 'Ce compte redeviendra un compte employé standard et perdra l\'accès à l\'espace d\'administration.'}
+                      ? 'Ce compte pourra gérer les comptes utilisateurs (avertissements, suspensions, rôles) et modérer le contenu.'
+                      : 'Ce compte pourra uniquement masquer ou supprimer publications et commentaires (panneau de modération).'}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -531,11 +645,10 @@ function DetailDialog({ userId, onClose }: { userId: string; onClose: () => void
             </AlertDialog>
 
             {showWarn && (
-              <WarningDialog
-                user={detail}
-                onClose={() => setShowWarn(false)}
-                onSubmitted={load}
-              />
+              <WarningDialog user={detail} onClose={() => setShowWarn(false)} onSubmitted={load} />
+            )}
+            {showReset && (
+              <ResetPasswordDialog user={detail} onClose={() => { setShowReset(false); load(); }} />
             )}
           </>
         )}
@@ -553,119 +666,351 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/* ============================ Ligne utilisateur =========================== */
+/* ============================ Modération ================================= */
 
-function UserRow({
-  user, onOpen, onQuickSuspend, onQuickReactivate, onQuickBan, onWarn, onDelete,
-}: {
-  user: UserResponse;
-  onOpen: () => void;
-  onQuickSuspend: () => void;
-  onQuickReactivate: () => void;
-  onQuickBan: () => void;
-  onWarn: () => void;
-  onDelete: () => void;
-}) {
-  const status = (user.status ?? 'ACTIVE') as UserAccountStatus;
-  const meta = STATUS_META[status];
-  const isAdmin = user.role === 'ADMIN' || user.role === 'SUPERADMIN';
+function ModerationView({ isAdmin }: { isAdmin: boolean }) {
+  const [listKind, setListKind] = useState<'posts' | 'comments'>('posts');
+  const [hiddenFilter, setHiddenFilter] = useState<'ALL' | 'VISIBLE' | 'HIDDEN'>('ALL');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [posts, setPosts] = useState<ModerationPost[]>([]);
+  const [comments, setComments] = useState<ModerationComment[]>([]);
+  const [count, setCount] = useState(0);
+  const [numPages, setNumPages] = useState(1);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [confirmAction, setConfirmAction] = useState<null | {
+    kind: 'hidePost' | 'unhidePost' | 'deletePost' | 'hideComment' | 'unhideComment' | 'deleteComment';
+    id: string;
+  }>(null);
+
+  const hidden = hiddenFilter === 'VISIBLE' ? false : hiddenFilter === 'HIDDEN' ? true : undefined;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      if (listKind === 'posts') {
+        const res = await adminApi.moderationPosts({ hidden, search: search || undefined }, page, 15);
+        setPosts(res.results);
+        setCount(res.count);
+        setNumPages(Math.max(1, res.numPages));
+      } else {
+        const res = await adminApi.moderationComments({ hidden, search: search || undefined }, page, 15);
+        setComments(res.results);
+        setCount(res.count);
+        setNumPages(Math.max(1, res.numPages));
+      }
+    } catch (e) {
+      setError((e as Error).message || 'Chargement impossible.');
+    } finally {
+      setLoading(false);
+    }
+  }, [listKind, hidden, search, page]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const runAction = async () => {
+    if (!confirmAction) return;
+    try {
+      switch (confirmAction.kind) {
+        case 'hidePost': await adminApi.hidePost(confirmAction.id); break;
+        case 'unhidePost': await adminApi.unhidePost(confirmAction.id); break;
+        case 'deletePost': await adminApi.deleteModerationPost(confirmAction.id); break;
+        case 'hideComment': await adminApi.hideComment(confirmAction.id); break;
+        case 'unhideComment': await adminApi.unhideComment(confirmAction.id); break;
+        case 'deleteComment': await adminApi.deleteModerationComment(confirmAction.id); break;
+      }
+      setConfirmAction(null);
+      await load();
+    } catch (e) {
+      setError((e as Error).message || 'Action impossible.');
+      setConfirmAction(null);
+    }
+  };
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/40 transition-colors">
-      <button onClick={onOpen} className="flex items-center gap-3 min-w-0 flex-1 text-left">
-        <Avatar className="size-9 shrink-0">
-          {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={user.firstName} /> : null}
-          <AvatarFallback className="bg-sky-100 text-sky-800 text-xs font-semibold">
-            {getInitials(user.firstName, user.lastName)}
-          </AvatarFallback>
-        </Avatar>
-        <div className="min-w-0">
-          <p className="text-sm font-medium truncate">
-            {user.firstName} {user.lastName}
-            {isAdmin && (
-              <span className="ml-2 text-[10px] font-semibold text-sky-800 bg-sky-100 rounded px-1.5 py-0.5 align-middle">
-                {ROLE_LABEL[user.role]}
-              </span>
-            )}
-          </p>
-          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-1 rounded-lg bg-muted p-1">
+          <Button variant={listKind === 'posts' ? 'secondary' : 'ghost'} size="sm" onClick={() => { setListKind('posts'); setPage(0); }}>
+            Publications
+          </Button>
+          <Button variant={listKind === 'comments' ? 'secondary' : 'ghost'} size="sm" onClick={() => { setListKind('comments'); setPage(0); }}>
+            Commentaires
+          </Button>
         </div>
-      </button>
-
-      <div className="hidden sm:block text-right shrink-0">
-        <p className="text-xs text-muted-foreground">Inscrit : {fmtDate(user.createdAt)}</p>
-        <p className="text-xs text-muted-foreground">Dern. conn. : {fmtDate(user.lastLoginAt)}</p>
+        <Select value={hiddenFilter} onValueChange={(v) => { setHiddenFilter(v as typeof hiddenFilter); setPage(0); }}>
+          <SelectTrigger className="w-[170px] h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">Tous</SelectItem>
+            <SelectItem value="VISIBLE">Visibles</SelectItem>
+            <SelectItem value="HIDDEN">Masqués</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setSearch(searchInput.trim()); setPage(0); } }}
+            placeholder={listKind === 'posts' ? 'Rechercher dans les publications…' : 'Rechercher dans les commentaires…'}
+            className="pl-9 h-9"
+          />
+        </div>
       </div>
 
-      <span className={cn('text-xs px-2 py-0.5 rounded-full border shrink-0', meta.badge)}>
-        {meta.label}
-      </span>
+      {error && <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600">{error}</div>}
 
-      <div className="flex items-center gap-1 shrink-0">
-        {status === 'SUSPENDED' ? (
-          <Button variant="ghost" size="sm" onClick={onQuickReactivate} title="Réactiver" className="text-green-700 hover:bg-green-50">
-            <CheckCircle2 className="size-4" />
-          </Button>
-        ) : status === 'ACTIVE' && !isAdmin ? (
-          <Button variant="ghost" size="sm" onClick={onQuickSuspend} title="Suspendre" className="text-orange-600 hover:bg-orange-50">
-            <ShieldAlert className="size-4" />
-          </Button>
-        ) : null}
-        <Button variant="ghost" size="sm" onClick={onOpen} title="Détail">
-          <UserCog className="size-4" />
-        </Button>
-        {/* Menu visible de toutes les actions — elles n'étaient auparavant
-            accessibles que depuis le dialogue de détail, sans indication. */}
-        {status !== 'DELETED' && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" title="Actions" aria-label={`Actions pour ${user.firstName} ${user.lastName}`}>
-                <EllipsisVertical className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onSelect={onOpen}>
-                <UserCog className="size-4" /> Voir le détail
-              </DropdownMenuItem>
-              {!isAdmin && (
-                <>
-                  <DropdownMenuItem onSelect={onWarn} className="text-orange-700 focus:text-orange-800">
-                    <AlertTriangle className="size-4" /> Avertir
-                  </DropdownMenuItem>
-                  {status === 'ACTIVE' && (
-                    <DropdownMenuItem onSelect={onQuickSuspend} className="text-orange-700 focus:text-orange-800">
-                      <ShieldAlert className="size-4" /> Suspendre
-                    </DropdownMenuItem>
-                  )}
-                  {status !== 'BANNED' && (
-                    <DropdownMenuItem onSelect={onQuickBan} className="text-red-700 focus:text-red-800">
-                      <Ban className="size-4" /> Bannir
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onSelect={onDelete} className="text-red-700 focus:text-red-800">
-                    <Trash2 className="size-4" /> Supprimer
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
+      {loading ? (
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <Loader2 className="size-5 animate-spin mr-2" /> Chargement…
+        </div>
+      ) : listKind === 'posts' ? (
+        posts.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">Aucune publication ne correspond.</div>
+        ) : (
+          <div className="space-y-2">
+            {posts.map((p) => (
+              <div key={p.id} className={cn(
+                'rounded-lg border border-border p-3',
+                p.hidden && 'bg-orange-50/60 border-orange-200'
+              )}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {p.author.fullName}
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">{p.author.email}</span>
+                    </p>
+                    <p className="mt-1 text-sm text-foreground/90 whitespace-pre-wrap line-clamp-4">{p.content ?? '(sans texte)'}</p>
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      {fmtDateTime(p.createdAt)} · {p.visibleCommentsCount} commentaire(s)
+                      {p.attachments?.length > 0 && ` · ${p.attachments.length} pièce(s) jointe(s)`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {p.hidden ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full border bg-orange-100 text-orange-700 border-orange-200">Masqué</span>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200">Visible</span>
+                    )}
+                    <Button
+                      variant="ghost" size="sm" title={p.hidden ? 'Restaurer' : 'Masquer'}
+                      onClick={() => setConfirmAction({ kind: p.hidden ? 'unhidePost' : 'hidePost', id: p.id })}
+                      className="text-orange-600 hover:bg-orange-50"
+                    >
+                      {p.hidden ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+                    </Button>
+                    {isAdmin && (
+                      <Button variant="ghost" size="sm" title="Supprimer définitivement" onClick={() => setConfirmAction({ kind: 'deletePost', id: p.id })} className="text-red-600 hover:bg-red-50">
+                        <Trash2 className="size-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        comments.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">Aucun commentaire ne correspond.</div>
+        ) : (
+          <div className="space-y-2">
+            {comments.map((c) => (
+              <div key={c.id} className={cn(
+                'rounded-lg border border-border p-3',
+                c.hidden ? 'bg-orange-50/60 border-orange-200' : ''
+              )}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {getInitials((c.author.fullName ?? '').split(' ')[0], (c.author.fullName ?? '').split(' ').slice(1).join(' '))}
+                      {c.author.fullName}
+                    </p>
+                    <p className="mt-1 text-sm text-foreground/90 whitespace-pre-wrap line-clamp-3">
+                      {c.sticker ? `Sticker : ${c.sticker}` : c.content ?? '(vide)'}
+                    </p>
+                    <p className="mt-1.5 text-xs text-muted-foreground">{fmtDateTime(c.createdAt)}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {c.hidden ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full border bg-orange-100 text-orange-700 border-orange-200">Masqué</span>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200">Visible</span>
+                    )}
+                    <Button
+                      variant="ghost" size="sm" title={c.hidden ? 'Restaurer' : 'Masquer'}
+                      onClick={() => setConfirmAction({ kind: c.hidden ? 'unhideComment' : 'hideComment', id: c.id })}
+                      className="text-orange-600 hover:bg-orange-50"
+                    >
+                      {c.hidden ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+                    </Button>
+                    <Button variant="ghost" size="sm" title="Supprimer définitivement" onClick={() => setConfirmAction({ kind: 'deleteComment', id: c.id })} className="text-red-600 hover:bg-red-50">
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {numPages > 1 && (
+        <div className="flex items-center justify-between pt-1">
+          <p className="text-xs text-muted-foreground">{count} élément(s) — page {page + 1} / {numPages}</p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="gap-1">
+              <ChevronLeft className="size-4" /> Précédent
+            </Button>
+            <Button variant="outline" size="sm" disabled={page >= numPages - 1} onClick={() => setPage((p) => p + 1)} className="gap-1">
+              Suivant <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <AlertDialog open={!!confirmAction} onOpenChange={(o) => !o && setConfirmAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmAction?.kind.startsWith('delete')
+                ? 'Supprimer définitivement ?'
+                : confirmAction?.kind.startsWith('hide')
+                ? 'Masquer ce contenu ?'
+                : 'Restaurer ce contenu ?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmAction?.kind.startsWith('delete')
+                ? 'Cette action est IRRÉVERSIBLE : le contenu sera définitivement effacé avec ses dépendances.'
+                : confirmAction?.kind.startsWith('hide')
+                ? 'Le contenu sera retiré du fil pour tous les utilisateurs. Il reste en base et peut être restauré à tout moment.'
+                : 'Le contenu redeviendra visible dans le fil pour tous les utilisateurs.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={runAction}
+              className={confirmAction?.kind.startsWith('delete') ? 'bg-red-600 hover:bg-red-700 text-white' : ''}
+            >
+              Confirmer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-/* ============================== AdminPage ================================= */
+/* ============================== Journal ================================== */
+
+function LogsView() {
+  const [entries, setEntries] = useState<AdminActionEntry[]>([]);
+  const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  const [page, setPage] = useState(0);
+  const [count, setCount] = useState(0);
+  const [numPages, setNumPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await adminApi.actions(
+        typeFilter === 'ALL' ? {} : { actionType: typeFilter }, page, 25
+      );
+      setEntries(res.results);
+      setCount(res.count);
+      setNumPages(Math.max(1, res.numPages));
+    } catch (e) {
+      setError((e as Error).message || 'Chargement du journal impossible.');
+    } finally {
+      setLoading(false);
+    }
+  }, [typeFilter, page]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); }}>
+          <SelectTrigger className="w-[240px] h-9"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">Tous les types d&apos;action</SelectItem>
+            {Object.entries(ACTION_LABEL).map(([value, label]) => (
+              <SelectItem key={value} value={value}>{label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {error && <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600">{error}</div>}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <Loader2 className="size-5 animate-spin mr-2" /> Chargement du journal…
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">Aucune action enregistrée.</div>
+      ) : (
+        <div className="space-y-2">
+          {entries.map((entry) => (
+            <div key={entry.id} className="rounded-lg border border-border p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium flex items-center gap-2">
+                    <FileText className="size-4 text-muted-foreground shrink-0" />
+                    <span className="text-xs px-2 py-0.5 rounded border bg-muted">
+                      {ACTION_LABEL[entry.actionType] ?? entry.actionType}
+                    </span>
+                  </p>
+                  <p className="mt-1 text-sm text-foreground/90">{entry.description}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Par <span className="font-medium">{entry.actorName ?? '—'}</span>
+                    {entry.targetUserName && <> — compte concerné : <span className="font-medium">{entry.targetUserName}</span></>}
+                  </p>
+                </div>
+                <p className="text-xs text-muted-foreground shrink-0">{fmtDateTime(entry.createdAt)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {numPages > 1 && (
+        <div className="flex items-center justify-between pt-1">
+          <p className="text-xs text-muted-foreground">{count} action(s) — page {page + 1} / {numPages}</p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="gap-1">
+              <ChevronLeft className="size-4" /> Précédent
+            </Button>
+            <Button variant="outline" size="sm" disabled={page >= numPages - 1} onClick={() => setPage((p) => p + 1)} className="gap-1">
+              Suivant <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================ Page Admin ================================= */
 
 const PAGE_SIZE = 20;
 
 export function AdminPage() {
   const navigateTo = useNavigationStore((s) => s.navigateTo);
   const currentUser = useAuthStore((s) => s.currentUser);
-  const isSuperAdmin = !!currentUser?.isSuperAdmin;
-  const lockAdmin = useAdminAuthStore((s) => s.lock);
+  const isAdmin = !!currentUser?.isAdmin;
 
+  const [tab, setTab] = useState<AdminTab>(isAdmin ? 'users' : 'moderation');
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [statsError, setStatsError] = useState('');
   const [users, setUsers] = useState<UserResponse[]>([]);
   const [count, setCount] = useState(0);
   const [numPages, setNumPages] = useState(1);
@@ -673,16 +1018,9 @@ export function AdminPage() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<UserAccountStatus | 'ALL'>('ALL');
-  const [registeredFrom, setRegisteredFrom] = useState('');
-  const [registeredTo, setRegisteredTo] = useState('');
-  const [lastLoginFrom, setLastLoginFrom] = useState('');
-  const [lastLoginTo, setLastLoginTo] = useState('');
-  // Filtres avancés (dates) visibles par défaut : ils faisaient partie des
-  // contenus « invisibles » signalés car repliés silencieusement.
-  const [showAdvanced, setShowAdvanced] = useState(true);
+  const [roleFilter, setRoleFilter] = useState<AdminRole | 'ALL'>('ALL');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [statsError, setStatsError] = useState('');
   const [detailUserId, setDetailUserId] = useState<string | null>(null);
   const [confirmUser, setConfirmUser] = useState<null | { id: string; action: 'suspend' | 'reactivate' | 'ban' }>(null);
   const [warnUser, setWarnUser] = useState<null | { id: string; firstName: string; lastName: string }>(null);
@@ -693,7 +1031,6 @@ export function AdminPage() {
       setStats(await adminApi.stats());
       setStatsError('');
     } catch (e) {
-      // Affiché sous les stats au lieu d'échouer silencieusement.
       setStatsError((e as Error).message || 'Statistiques indisponibles.');
     }
   }, []);
@@ -706,15 +1043,12 @@ export function AdminPage() {
         {
           search,
           status: statusFilter === 'ALL' ? undefined : statusFilter,
-          registeredFrom: registeredFrom || undefined,
-          registeredTo: registeredTo || undefined,
-          lastLoginFrom: lastLoginFrom || undefined,
-          lastLoginTo: lastLoginTo || undefined,
         },
         page,
         PAGE_SIZE,
       );
-      setUsers(res.results);
+      // Filtre de rôle côté client (peu de comptes concernés).
+      setUsers(res.results.filter((u) => roleFilter === 'ALL' || u.role === roleFilter));
       setCount(res.count);
       setNumPages(Math.max(1, res.numPages));
     } catch (e) {
@@ -722,30 +1056,16 @@ export function AdminPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, registeredFrom, registeredTo, lastLoginFrom, lastLoginTo, page]);
+  }, [search, statusFilter, roleFilter, page]);
 
+  useEffect(() => { loadStats(); }, [loadStats]);
   useEffect(() => {
-    loadStats();
-  }, [loadStats]);
-
-  useEffect(() => {
-    loadUsers();
-  }, [loadUsers]);
+    if (tab === 'users' && isAdmin) loadUsers();
+  }, [tab, isAdmin, loadUsers]);
 
   const submitSearch = () => {
     setPage(0);
     setSearch(searchInput.trim());
-  };
-
-  const resetFilters = () => {
-    setSearchInput('');
-    setSearch('');
-    setStatusFilter('ALL');
-    setRegisteredFrom('');
-    setRegisteredTo('');
-    setLastLoginFrom('');
-    setLastLoginTo('');
-    setPage(0);
   };
 
   const runQuickAction = async () => {
@@ -774,192 +1094,301 @@ export function AdminPage() {
           <div>
             <h1 className="text-xl font-bold tracking-tight">Administration</h1>
             <p className="text-sm text-muted-foreground">
-              Espace {isSuperAdmin ? 'Superadmin' : 'Admin'} — gestion des comptes utilisateurs
+              Gestion des utilisateurs, modération, journal et statistiques
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button
             variant="outline" size="sm"
-            onClick={() => { lockAdmin(); navigateTo('feed'); }}
+            onClick={() => navigateTo('feed')}
             className="gap-1.5"
           >
-            <ArrowLeft className="size-4" /> Verrouiller
+            <ArrowLeft className="size-4" /> Retour
           </Button>
         </div>
       </div>
 
-      {/* Statistiques */}
-      <StatsBanner stats={stats} onReload={loadStats} />
-      {statsError && (
-        <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600">
-          Statistiques : {statsError}
-        </div>
-      )}
+      {/* Onglets */}
+      <TabsBar tab={tab} onTab={setTab} isAdmin={isAdmin} stats={stats} />
 
-      {/* Filtres */}
-      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[220px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
-              placeholder="Rechercher par nom ou e-mail…"
-              className="pl-9 h-9"
+      {/* Contenu selon l'onglet */}
+      {tab === 'stats' && <StatsView stats={stats} onReload={loadStats} error={statsError} />}
+      {tab === 'moderation' && <ModerationView isAdmin={isAdmin} />}
+      {tab === 'logs' && isAdmin && <LogsView />}
+
+      {/* Onglet Utilisateurs */}
+      {tab === 'users' && isAdmin && (
+        <>
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[220px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
+                  placeholder="Rechercher par nom ou e-mail…"
+                  className="pl-9 h-9"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v as UserAccountStatus | 'ALL'); setPage(0); }}>
+                <SelectTrigger className="w-[170px] h-9"><SelectValue placeholder="Statut" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Tous les statuts</SelectItem>
+                  <SelectItem value="ACTIVE">Actifs</SelectItem>
+                  <SelectItem value="SUSPENDED">Suspendus</SelectItem>
+                  <SelectItem value="BANNED">Bannis</SelectItem>
+                  <SelectItem value="DELETED">Supprimés</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={roleFilter} onValueChange={(v) => { setRoleFilter(v as AdminRole | 'ALL'); setPage(0); }}>
+                <SelectTrigger className="w-[170px] h-9"><SelectValue placeholder="Rôle" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Tous les rôles</SelectItem>
+                  <SelectItem value="EMPLOYEE">Employés</SelectItem>
+                  <SelectItem value="MODERATOR">Modérateurs</SelectItem>
+                  <SelectItem value="ADMIN">Admins</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={() => { setSearchInput(''); setSearch(''); setStatusFilter('ALL'); setRoleFilter('ALL'); setPage(0); }}>
+                Réinitialiser
+              </Button>
+            </div>
+          </div>
+
+          {stats && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard icon={<Users className="size-5 text-white" />} label="Utilisateurs" value={stats.totalUsers} tone="bg-sky-900" />
+              <StatCard icon={<UserPlus className="size-5 text-white" />} label="Nouveaux aujourd'hui" value={stats.newToday} tone="bg-emerald-600" />
+              <StatCard icon={<ShieldAlert className="size-5 text-white" />} label="Suspendus" value={stats.suspendedAccounts} tone="bg-orange-500" />
+              <StatCard icon={<Ban className="size-5 text-white" />} label="Bannis" value={stats.bannedAccounts} tone="bg-red-600" />
+            </div>
+          )}
+          {statsError && (
+            <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600">
+              Statistiques : {statsError}
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600">{error}</div>
+          )}
+
+          {loading ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground">
+              <Loader2 className="size-5 animate-spin mr-2" /> Chargement des comptes…
+            </div>
+          ) : users.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">Aucun compte ne correspond aux filtres.</div>
+          ) : (
+            <div className="space-y-2">
+              {users.map((u) => (
+                <UserRow
+                  key={u.id}
+                  user={u}
+                  onOpen={() => setDetailUserId(u.id)}
+                  onQuickSuspend={() => setConfirmUser({ id: u.id, action: 'suspend' })}
+                  onQuickReactivate={() => setConfirmUser({ id: u.id, action: 'reactivate' })}
+                  onQuickBan={() => setConfirmUser({ id: u.id, action: 'ban' })}
+                  onWarn={() => setWarnUser({ id: u.id, firstName: u.firstName, lastName: u.lastName })}
+                  onDelete={() => setDeleteUser({ id: u.id, firstName: u.firstName, lastName: u.lastName })}
+                />
+              ))}
+            </div>
+          )}
+
+          {numPages > 1 && (
+            <div className="flex items-center justify-between pt-1">
+              <p className="text-xs text-muted-foreground">
+                {count} compte(s) — page {page + 1} / {numPages}
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="gap-1">
+                  <ChevronLeft className="size-4" /> Précédent
+                </Button>
+                <Button variant="outline" size="sm" disabled={page >= numPages - 1} onClick={() => setPage((p) => p + 1)} className="gap-1">
+                  Suivant <ChevronRight className="size-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Détail utilisateur */}
+          {detailUserId && (
+            <DetailDialog
+              userId={detailUserId}
+              canManageUsers={isAdmin}
+              onClose={() => { setDetailUserId(null); loadUsers(); loadStats(); }}
             />
-          </div>
-          <StatusFilter
-            value={statusFilter}
-            onChange={(v) => { setStatusFilter(v); setPage(0); }}
-          />
-          <Button
-            variant="outline" size="sm"
-            onClick={() => setShowAdvanced((s) => !s)}
-            className="gap-1.5"
-          >
-            {showAdvanced ? <X className="size-3.5" /> : null}
-            Filtres avancés
-          </Button>
-          <Button variant="outline" size="sm" onClick={resetFilters}>Réinitialiser</Button>
-        </div>
+          )}
 
-        {showAdvanced && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
-            <div className="space-y-1">
-              <Label className="text-xs">Inscrit du</Label>
-              <Input type="date" value={registeredFrom} onChange={(e) => { setRegisteredFrom(e.target.value); setPage(0); }} className="h-9" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Inscrit au</Label>
-              <Input type="date" value={registeredTo} onChange={(e) => { setRegisteredTo(e.target.value); setPage(0); }} className="h-9" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Connexion du</Label>
-              <Input type="date" value={lastLoginFrom} onChange={(e) => { setLastLoginFrom(e.target.value); setPage(0); }} className="h-9" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Connexion au</Label>
-              <Input type="date" value={lastLoginTo} onChange={(e) => { setLastLoginTo(e.target.value); setPage(0); }} className="h-9" />
-            </div>
-          </div>
+          {/* Confirmation action rapide */}
+          <AlertDialog open={!!confirmUser} onOpenChange={(o) => !o && setConfirmUser(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {confirmUser?.action === 'suspend' ? 'Suspendre ce compte ?'
+                    : confirmUser?.action === 'ban' ? 'Bannir durablement ce compte ?'
+                    : 'Réactiver ce compte ?'}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {confirmUser?.action === 'suspend'
+                    ? 'L\'utilisateur ne pourra plus se connecter ni publier. Ses données sont conservées et le compte est réactivable.'
+                    : confirmUser?.action === 'ban'
+                    ? 'Le bannissement est définitif : l\'utilisateur ne pourra plus jamais se connecter.'
+                    : 'L\'utilisateur retrouvera l\'accès à son compte.'}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Annuler</AlertDialogCancel>
+                <AlertDialogAction onClick={runQuickAction}>Confirmer</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {/* Avertissement depuis la liste */}
+          {warnUser && (
+            <WarningDialog user={warnUser} onClose={() => setWarnUser(null)} onSubmitted={loadUsers} />
+          )}
+
+          {/* Suppression logique depuis la liste */}
+          <AlertDialog open={!!deleteUser} onOpenChange={(o) => !o && setDeleteUser(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Supprimer ce compte ?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Suppression logique : les données de {deleteUser?.firstName} {deleteUser?.lastName} sont anonymisées
+                  et le compte ne peut plus se connecter. Les échanges existants (messages, publications) sont conservés
+                  pour ne pas casser les conversations des autres utilisateurs.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Annuler</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={async () => {
+                    if (!deleteUser) return;
+                    try {
+                      await adminApi.deleteUser(deleteUser.id);
+                    } catch (e) {
+                      setError((e as Error).message || 'Suppression impossible.');
+                    }
+                    setDeleteUser(null);
+                    await loadUsers();
+                    await loadStats();
+                  }}
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                >
+                  Supprimer définitivement
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============================ Ligne utilisateur =========================== */
+
+function UserRow({
+  user, onOpen, onQuickSuspend, onQuickReactivate, onQuickBan, onWarn, onDelete,
+}: {
+  user: UserResponse;
+  onOpen: () => void;
+  onQuickSuspend: () => void;
+  onQuickReactivate: () => void;
+  onQuickBan: () => void;
+  onWarn: () => void;
+  onDelete: () => void;
+}) {
+  const status = (user.status ?? 'ACTIVE') as UserAccountStatus;
+  const meta = STATUS_META[status];
+  const isStaff = user.role === 'ADMIN' || user.role === 'MODERATOR';
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/40 transition-colors">
+      <button onClick={onOpen} className="flex items-center gap-3 min-w-0 flex-1 text-left">
+        <Avatar className="size-9 shrink-0">
+          {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={user.firstName} /> : null}
+          <AvatarFallback className="bg-sky-100 text-sky-800 text-xs font-semibold">
+            {getInitials(user.firstName, user.lastName)}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate">
+            {user.firstName} {user.lastName}
+            {isStaff && (
+              <span className={cn(
+                'ml-2 text-[10px] font-semibold rounded px-1.5 py-0.5 align-middle',
+                user.role === 'ADMIN' ? 'text-sky-800 bg-sky-100' : 'text-teal-800 bg-teal-100'
+              )}>
+                {ROLE_LABEL[user.role]}
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+        </div>
+      </button>
+
+      <div className="hidden sm:block text-right shrink-0">
+        <p className="text-xs text-muted-foreground">Inscrit : {fmtDate(user.createdAt)}</p>
+        <p className="text-xs text-muted-foreground">Dern. conn. : {fmtDate(user.lastLoginAt)}</p>
+      </div>
+
+      <span className={cn('text-xs px-2 py-0.5 rounded-full border shrink-0', meta.badge)}>
+        {meta.label}
+      </span>
+
+      <div className="flex items-center gap-1 shrink-0">
+        {status === 'SUSPENDED' ? (
+          <Button variant="ghost" size="sm" onClick={onQuickReactivate} title="Réactiver" className="text-green-700 hover:bg-green-50">
+            <CheckCircle2 className="size-4" />
+          </Button>
+        ) : status === 'ACTIVE' && !isStaff ? (
+          <Button variant="ghost" size="sm" onClick={onQuickSuspend} title="Suspendre" className="text-orange-600 hover:bg-orange-50">
+            <ShieldAlert className="size-4" />
+          </Button>
+        ) : null}
+        <Button variant="ghost" size="sm" onClick={onOpen} title="Détail">
+          <UserCog className="size-4" />
+        </Button>
+        {status !== 'DELETED' && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" title="Actions" aria-label={`Actions pour ${user.firstName} ${user.lastName}`}>
+                <EllipsisVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onSelect={onOpen}>
+                <UserCog className="size-4" /> Voir le détail
+              </DropdownMenuItem>
+              {!isStaff && (
+                <>
+                  <DropdownMenuItem onSelect={onWarn} className="text-orange-700 focus:text-orange-800">
+                    <AlertTriangle className="size-4" /> Avertir
+                  </DropdownMenuItem>
+                  {status === 'ACTIVE' && (
+                    <DropdownMenuItem onSelect={onQuickSuspend} className="text-orange-700 focus:text-orange-800">
+                      <ShieldAlert className="size-4" /> Suspendre
+                    </DropdownMenuItem>
+                  )}
+                  {status !== 'BANNED' && (
+                    <DropdownMenuItem onSelect={onQuickBan} className="text-red-700 focus:text-red-800">
+                      <Ban className="size-4" /> Bannir
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={onDelete} className="text-red-700 focus:text-red-800">
+                    <Trash2 className="size-4" /> Supprimer
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
-
-      {/* Liste */}
-      {error && (
-        <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600">{error}</div>
-      )}
-
-      {loading ? (
-        <div className="flex items-center justify-center py-12 text-muted-foreground">
-          <Loader2 className="size-5 animate-spin mr-2" /> Chargement des comptes…
-        </div>
-      ) : users.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">Aucun compte ne correspond aux filtres.</div>
-      ) : (
-        <div className="space-y-2">
-          {users.map((u) => (
-            <UserRow
-              key={u.id}
-              user={u}
-              onOpen={() => setDetailUserId(u.id)}
-              onQuickSuspend={() => setConfirmUser({ id: u.id, action: 'suspend' })}
-              onQuickReactivate={() => setConfirmUser({ id: u.id, action: 'reactivate' })}
-              onQuickBan={() => setConfirmUser({ id: u.id, action: 'ban' })}
-              onWarn={() => setWarnUser({ id: u.id, firstName: u.firstName, lastName: u.lastName })}
-              onDelete={() => setDeleteUser({ id: u.id, firstName: u.firstName, lastName: u.lastName })}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Pagination */}
-      {numPages > 1 && (
-        <div className="flex items-center justify-between pt-1">
-          <p className="text-xs text-muted-foreground">
-            {count} compte(s) — page {page + 1} / {numPages}
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="gap-1">
-              <ChevronLeft className="size-4" /> Précédent
-            </Button>
-            <Button variant="outline" size="sm" disabled={page >= numPages - 1} onClick={() => setPage((p) => p + 1)} className="gap-1">
-              Suivant <ChevronRight className="size-4" />
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Détail utilisateur */}
-      {detailUserId && (
-        <DetailDialog userId={detailUserId} onClose={() => { setDetailUserId(null); loadUsers(); loadStats(); }} />
-      )}
-
-      {/* Confirmation action rapide (suspendre / réactiver / bannir depuis la liste) */}
-      <AlertDialog open={!!confirmUser} onOpenChange={(o) => !o && setConfirmUser(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmUser?.action === 'suspend' ? 'Suspendre ce compte ?'
-                : confirmUser?.action === 'ban' ? 'Bannir durablement ce compte ?'
-                : 'Réactiver ce compte ?'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmUser?.action === 'suspend'
-                ? 'L\'utilisateur ne pourra plus se connecter. Ses données sont conservées et le compte est réactivable.'
-                : confirmUser?.action === 'ban'
-                ? 'Le bannissement est définitif : l\'utilisateur ne pourra plus jamais se connecter.'
-                : 'L\'utilisateur retrouvera l\'accès à son compte.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Annuler</AlertDialogCancel>
-            <AlertDialogAction onClick={runQuickAction}>Confirmer</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Avertissement depuis la liste (réutilise le dialogue existant) */}
-      {warnUser && (
-        <WarningDialog
-          user={warnUser}
-          onClose={() => setWarnUser(null)}
-          onSubmitted={loadUsers}
-        />
-      )}
-
-      {/* Suppression logique depuis la liste */}
-      <AlertDialog open={!!deleteUser} onOpenChange={(o) => !o && setDeleteUser(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Supprimer ce compte ?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Suppression logique : les données de {deleteUser?.firstName} {deleteUser?.lastName} sont anonymisées
-              et le compte ne peut plus se connecter. Les échanges existants (messages, publications) sont conservés.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Annuler</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={async () => {
-                if (!deleteUser) return;
-                try {
-                  await adminApi.deleteUser(deleteUser.id);
-                } catch (e) {
-                  setError((e as Error).message || 'Suppression impossible.');
-                }
-                setDeleteUser(null);
-                await loadUsers();
-                await loadStats();
-              }}
-            >
-              Supprimer définitivement
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
