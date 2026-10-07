@@ -94,13 +94,36 @@ public class AccountService {
     }
 
     public User authenticate(String email, String rawPassword) {
+        // Message clair pour les comptes administrativement bloqués (sinon le
+        // DisabledException serait masqué derrière « Identifiants invalides »).
+        userRepository.findByEmail(email).ifPresent(user -> {
+            if (user.getStatus() == UserStatus.SUSPENDED) {
+                throw new BusinessRuleException("Votre compte est suspendu. Contactez l'administration.");
+            }
+            if (user.getStatus() == UserStatus.BANNED) {
+                throw new BusinessRuleException("Votre compte est banni définitivement.");
+            }
+            if (user.getStatus() == UserStatus.DELETED) {
+                throw new BadCredentialsException("Identifiants invalides.");
+            }
+        });
         try {
             authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, rawPassword));
         } catch (org.springframework.security.core.AuthenticationException ex) {
             throw new BadCredentialsException("Identifiants invalides.");
         }
-        return userRepository.findByEmail(email)
+        User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("Utilisateur introuvable."));
+        // Date de dernière connexion (visible dans l'espace d'administration).
+        user.setLastLoginAt(java.time.Instant.now());
+        return userRepository.save(user);
+    }
+
+    /** Un refresh token ne doit pas ressusciter une session d'un compte bloqué. */
+    public void assertCanUseSession(User user) {
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessRuleException("Votre compte n'est plus actif.");
+        }
     }
 
     public User getById(UUID id) {
@@ -110,10 +133,17 @@ public class AccountService {
 
     @Transactional
     public void changePassword(User user, String oldPassword, String newPassword) {
-        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
-            throw new BusinessRuleException("Mot de passe actuel incorrect.");
+        // L'ancien mot de passe n'est exigé que si le serveur n'a PAS posé le flag
+        // « mot de passe à changer » (cas du compte bootstrap à la 1re connexion).
+        if (!user.isMustChangePassword()) {
+            if (oldPassword == null || oldPassword.isBlank()
+                    || !passwordEncoder.matches(oldPassword, user.getPassword())) {
+                throw new BusinessRuleException("Mot de passe actuel incorrect.");
+            }
         }
         user.setPassword(passwordEncoder.encode(newPassword));
+        // Le changement fait par l'utilisateur lève le flag posé par le bootstrap.
+        user.setMustChangePassword(false);
         userRepository.save(user);
     }
 

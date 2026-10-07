@@ -1,0 +1,11 @@
+# IDE / éditeurs
+.vscode/
+.idea/
+
+# Outils locaux
+.freebuff/
+
+# Logs et bases de données locales
+*.log
+*.db
+*.sqlite

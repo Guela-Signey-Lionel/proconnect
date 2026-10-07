@@ -16,6 +16,7 @@ public record ProfileResponse(
         String bio,
         String location,
         String phone,
+        boolean online,
         List<SkillDto> skills,
         List<ExperienceDto> experiences,
         List<EducationDto> education,
@@ -25,6 +26,7 @@ public record ProfileResponse(
         return new ProfileResponse(
                 p.getId(), p.getUser().getId(), p.getUser().getFullName(), p.getUser().getEmail(),
                 p.getAvatarUrl(), p.getCoverUrl(), p.getJobTitle(), p.getDepartment(), p.getBio(), p.getLocation(), p.getPhone(),
+                p.getUser() != null && p.getUser().isOnline(),
                 p.getSkills().stream().map(SkillDto::from).toList(),
                 p.getExperiences().stream().map(ExperienceDto::from).toList(),
                 p.getEducation().stream().map(EducationDto::from).toList(),

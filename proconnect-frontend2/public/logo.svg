@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pcBg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d1a30"/>
+      <stop offset="0.55" stop-color="#142646"/>
+      <stop offset="1" stop-color="#1d3461"/>
+    </linearGradient>
+    <linearGradient id="pcShine" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fond arrondi bleu nuit -->
+  <rect width="64" height="64" rx="16" fill="url(#pcBg)"/>
+  <rect width="64" height="64" rx="16" fill="url(#pcShine)"/>
+
+  <!-- Réseau professionnel : nœuds connectés -->
+  <g stroke="#ffffff" stroke-width="2" stroke-linecap="round">
+    <line x1="32" y1="20" x2="18" y2="42"/>
+    <line x1="32" y1="20" x2="46" y2="42"/>
+    <line x1="18" y1="42" x2="32" y2="48"/>
+    <line x1="46" y1="42" x2="32" y2="48"/>
+  </g>
+
+  <g fill="#ffffff">
+    <!-- Nœud central -->
+    <circle cx="32" cy="20" r="6"/>
+    <!-- Nœuds secondaires -->
+    <circle cx="18" cy="42" r="5" fill="#8aa6df"/>
+    <circle cx="46" cy="42" r="5" fill="#8aa6df"/>
+    <!-- Nœud bas -->
+    <circle cx="32" cy="48" r="4"/>
+  </g>
+
+  <!-- Point d'accent clair -->
+  <circle cx="32" cy="20" r="2.2" fill="#142646"/>
+</svg>

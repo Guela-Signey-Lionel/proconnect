@@ -16,4 +16,6 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     long countByConversationIdAndSenderNotAndCreatedAtAfter(UUID conversationId, User sender, Instant after);
 
     long countByConversationIdAndSenderNot(UUID conversationId, User sender);
+
+    long countBySenderId(UUID senderId);
 }

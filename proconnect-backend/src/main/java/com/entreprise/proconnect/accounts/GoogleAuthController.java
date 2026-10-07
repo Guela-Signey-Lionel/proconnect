@@ -25,6 +25,7 @@ public class GoogleAuthController {
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
     private final AccountService accountService;
     private final JwtService jwtService;
+    private final UserRepository userRepository;
 
     @Value("${proconnect.google.client-id:}")
     private String clientId;
@@ -32,11 +33,13 @@ public class GoogleAuthController {
     public GoogleAuthController(
             GoogleIdTokenVerifier googleIdTokenVerifier,
             AccountService accountService,
-            JwtService jwtService
+            JwtService jwtService,
+            UserRepository userRepository
     ) {
         this.googleIdTokenVerifier = googleIdTokenVerifier;
         this.accountService = accountService;
         this.jwtService = jwtService;
+        this.userRepository = userRepository;
     }
 
     /** Public info used by the frontend to render the Google button. */
@@ -59,6 +62,16 @@ public class GoogleAuthController {
         } catch (IllegalArgumentException ex) {
             throw new BusinessRuleException(ex.getMessage());
         }
+
+        // Un compte suspendu/banni ne peut pas se (re)connecter, même via Google.
+        userRepository.findByEmail(profile.email()).ifPresent(user -> {
+            if (user.getStatus() == UserStatus.SUSPENDED) {
+                throw new BusinessRuleException("Votre compte est suspendu. Contactez l'administration.");
+            }
+            if (user.getStatus() == UserStatus.BANNED) {
+                throw new BusinessRuleException("Votre compte est banni définitivement.");
+            }
+        });
 
         User user = accountService.findOrCreateGoogleUser(
                 profile.email(), profile.firstName(), profile.lastName(), profile.picture()

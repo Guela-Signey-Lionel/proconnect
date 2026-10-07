@@ -4,7 +4,8 @@ import com.entreprise.proconnect.accounts.User;
 import java.util.UUID;
 
 public record ParticipantResponse(
-        UUID id, String email, String firstName, String lastName, String avatarUrl, String phone
+        UUID id, String email, String firstName, String lastName, String avatarUrl, String phone,
+        boolean online
 ) {
 
     public static ParticipantResponse from(User user) {
@@ -16,8 +17,12 @@ public record ParticipantResponse(
     }
 
     public static ParticipantResponse from(User user, String avatarUrl, String phone) {
+        return from(user, avatarUrl, phone, user != null && user.isOnline());
+    }
+
+    public static ParticipantResponse from(User user, String avatarUrl, String phone, boolean online) {
         return new ParticipantResponse(
-                user.getId(), user.getEmail(), user.getFirstName(), user.getLastName(), avatarUrl, phone
+                user.getId(), user.getEmail(), user.getFirstName(), user.getLastName(), avatarUrl, phone, online
         );
     }
 }

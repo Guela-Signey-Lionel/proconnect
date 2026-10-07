@@ -50,12 +50,12 @@ public class AccountController {
     }
 
     @PostMapping("/login/")
-    @Operation(summary = "Connexion — renvoie un access token et un refresh token")
+    @Operation(summary = "Connexion — renvoie un access token, un refresh token et le flag « mot de passe à changer »")
     public ResponseEntity<TokenResponse> login(@Valid @RequestBody LoginRequest request) {
         User user = accountService.authenticate(request.email(), request.password());
         String accessToken = jwtService.generateAccessToken(user, user.getId());
         String refreshToken = jwtService.generateRefreshToken(user, user.getId());
-        return ResponseEntity.ok(new TokenResponse(accessToken, refreshToken));
+        return ResponseEntity.ok(new TokenResponse(accessToken, refreshToken, "Bearer", user.isMustChangePassword()));
     }
 
     @PostMapping("/login/refresh/")
@@ -66,6 +66,8 @@ public class AccountController {
             throw new BusinessRuleException("Jeton invalide : un refresh token est attendu.");
         }
         User user = accountService.getById(jwtService.extractUserId(token));
+        // Un compte suspendu/banni/supprimé ne peut pas rafraîchir sa session.
+        accountService.assertCanUseSession(user);
         if (!jwtService.isTokenValid(token, user)) {
             throw new BusinessRuleException("Refresh token invalide ou expiré.");
         }
