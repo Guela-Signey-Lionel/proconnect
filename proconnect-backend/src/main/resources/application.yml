@@ -84,6 +84,14 @@ proconnect:
     access-ttl-minutes: ${JWT_ACCESS_TTL_MINUTES:30}
     refresh-ttl-days: ${JWT_REFRESH_TTL_DAYS:7}
 
+  # Connexion par code email (OTP) : le code est haché en HMAC-SHA256 avec ce
+  # secret. En production, TOUS MUST être défini (longue chaîne aléatoire) et
+  # différent de JWT_SECRET. Bien configurer un expéditeur (MAIL_FROM) joignable
+  # via SPF/DKIM/DMARC pour éviter que les codes n'arrivent en spam.
+  otp:
+    secret: ${OTP_SECRET:change-me-to-a-long-random-otp-secret-in-production}
+    mail-from: ${MAIL_FROM:${EMAIL_FROM:}}
+
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     access-key: ${STORAGE_ACCESS_KEY:minioadmin}

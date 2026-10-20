@@ -93,6 +93,43 @@ public class AccountService {
         // pictureUrl is kept for API parity; the avatar lives on the Profile entity.
     }
 
+    /**
+     * Used by the OTP login flow: find the account by email, or create one with
+     * an unusable random password derived from the email (OTP accounts never
+     * authenticate by password until a password is set).
+     */
+    @Transactional
+    public User findOrCreateOtpUser(String rawEmail) {
+        String email = rawEmail == null ? "" : rawEmail.trim().toLowerCase();
+        return userRepository.findByEmail(email).orElseGet(() -> {
+            // Prénom/nom par défaut déduits de la partie locale de l'email
+            // ("jean.dupont@entreprise.com" -> "Jean" / "Dupont"), complétables
+            // ensuite via le profil. On sécurise : tout est ramené à "$1" sinon.
+            String local = email.contains("@") ? email.substring(0, email.indexOf('@')) : email;
+            String[] parts = local.split("[._-]+", 2);
+            String firstName = parts[0].isBlank() ? "-"
+                    : Character.toUpperCase(parts[0].charAt(0)) + parts[0].substring(1);
+            String lastName = parts.length > 1 && !parts[1].isBlank()
+                    ? Character.toUpperCase(parts[1].charAt(0)) + parts[1].substring(1)
+                    : "-";
+
+            User user = User.builder()
+                    .email(email)
+                    // Un-guessable random password : l'utilisateur peut toujours
+                    // utiliser "mot de passe oublié" plus tard.
+                    .password(passwordEncoder.encode(UUID.randomUUID() + ":" + UUID.randomUUID()))
+                    .firstName(firstName)
+                    .lastName(lastName)
+                    .role(Role.EMPLOYEE)
+                    .active(true)
+                    .build();
+            User saved = userRepository.save(user);
+            // Profil systématique : garantit la visibilité du compte chez les autres utilisateurs.
+            profileRepository.save(Profile.builder().user(saved).build());
+            return saved;
+        });
+    }
+
     public User authenticate(String email, String rawPassword) {
         // Message clair pour les comptes administrativement bloqués (sinon le
         // DisabledException serait masqué derrière « Identifiants invalides »).
@@ -124,6 +161,25 @@ public class AccountService {
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new BusinessRuleException("Votre compte n'est plus actif.");
         }
+    }
+
+    /**
+     * Contrôle du statut du compte après vérification OTP, avec les mêmes messages
+     * clairs que le login par mot de passe (suspendu / banni / supprimé).
+     */
+    public User assertCanLoginOtp(User user) {
+        if (user.getStatus() == UserStatus.SUSPENDED) {
+            throw new BusinessRuleException("Votre compte est suspendu. Contactez l'administration.");
+        }
+        if (user.getStatus() == UserStatus.BANNED) {
+            throw new BusinessRuleException("Votre compte est banni définitivement.");
+        }
+        if (user.getStatus() == UserStatus.DELETED) {
+            throw new BusinessRuleException("Identifiants invalides.");
+        }
+        // Date de dernière connexion (visible dans l'espace d'administration).
+        user.setLastLoginAt(java.time.Instant.now());
+        return userRepository.save(user);
     }
 
     public User getById(UUID id) {

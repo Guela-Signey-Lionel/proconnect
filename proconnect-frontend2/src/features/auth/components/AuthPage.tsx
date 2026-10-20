@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, EyeOff, Building2, MessageSquare, FolderOpen, Users, Shield, CheckCircle2, ArrowLeft, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Building2, MessageSquare, FolderOpen, Users, Shield, CheckCircle2, ArrowLeft, Loader2, Mail, KeyRound, MailCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,7 +12,7 @@ import { useAuthStore } from '@/store';
 import { authApi } from '@/lib/api-services';
 import { API_BASE_URL } from '@/lib/api';
 
-type AuthView = 'login' | 'register' | 'forgot';
+type AuthView = 'login' | 'register' | 'forgot' | 'otp';
 type RegisterStep = 1 | 2 | 3;
 
 /* ------------------------------------------------------------------ */
@@ -187,6 +187,150 @@ const viewVariants = {
 };
 
 /* ------------------------------------------------------------------ */
+/*  LOGIN PAR CODE EMAIL (OTP, 2 étapes)                               */
+/* ------------------------------------------------------------------ */
+function OtpView({ onSwitch }: { onSwitch: (v: AuthView) => void }) {
+  const loginWithOtp = useAuthStore((s) => s.loginWithOtp);
+  const [step, setStep] = useState<'email' | 'code'>('email');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  /** Étape 1 : demander l'envoi du code par email. */
+  const handleRequest = useCallback(async () => {
+    if (!email) return;
+    setLoading(true);
+    setError('');
+    try {
+      await authApi.otpRequest(email.trim().toLowerCase());
+      setMessage(`Si un compte existe pour ${email.trim()}, un code vient de partir par email (valable 10 minutes).`);
+      setStep('code');
+    } catch (e) {
+      setError((e as Error).message || 'Envoi du code impossible.');
+    } finally {
+      setLoading(false);
+    }
+  }, [email]);
+
+  /** Étape 2 : soumettre le code à 6 chiffres. */
+  const handleVerify = useCallback(async () => {
+    if (code.length !== 6) return;
+    setLoading(true);
+    setError('');
+    try {
+      await loginWithOtp(email.trim().toLowerCase(), code);
+      // Success → le store passe isAuthenticated, AuthPage disparaît.
+    } catch (e) {
+      setError((e as Error).message || 'Code invalide ou expiré.');
+    } finally {
+      setLoading(false);
+    }
+  }, [email, code, loginWithOtp]);
+
+  return (
+    <motion.div key="otp" {...viewVariants} transition={{ duration: 0.35, ease: 'easeInOut' }} className="space-y-5 w-full">
+      <div className="text-center lg:text-left mb-2">
+        <h1 className="text-2xl sm:text-[28px] font-bold text-gray-900 tracking-tight">Connexion par code email</h1>
+        <p className="text-gray-500 mt-1.5 text-[15px]">
+          {step === 'email'
+            ? 'Recevez un code à 6 chiffres dans votre boîte mail'
+            : `Saisissez le code envoyé à ${email}`}
+        </p>
+      </div>
+
+      {error && (
+        <div className="rounded-lg bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600">
+          {error}
+        </div>
+      )}
+      {step === 'code' && message && !error && (
+        <div className="rounded-lg bg-blue-50 border border-blue-100 px-4 py-3 text-sm text-blue-700 flex items-start gap-2">
+          <MailCheck className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{message}</span>
+        </div>
+      )}
+
+      {step === 'email' ? (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="otp-email" className="text-sm font-medium text-gray-700">Adresse e-mail professionnelle</Label>
+            <Input
+              id="otp-email"
+              type="email"
+              placeholder="votre.nom@entreprise.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleRequest()}
+              className="h-11 rounded-lg border-gray-200 focus-visible:ring-[#b6c9ed] focus-visible:border-[#2f5496] text-[15px]"
+            />
+          </div>
+
+          <Button
+            onClick={handleRequest}
+            disabled={loading || !email}
+            className="w-full h-11 bg-[#2f5496] hover:bg-[#26447d] text-white font-semibold rounded-lg text-[15px] transition-colors"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />}
+            {loading ? 'Envoi en cours…' : 'Recevoir le code'}
+          </Button>
+        </>
+      ) : (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="otp-code" className="text-sm font-medium text-gray-700">Code à 6 chiffres</Label>
+            <Input
+              id="otp-code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="••••••"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
+              className="h-12 rounded-lg border-gray-200 focus-visible:ring-[#b6c9ed] focus-visible:border-[#2f5496] text-lg tracking-[0.4em] text-center font-semibold"
+            />
+          </div>
+
+          <Button
+            onClick={handleVerify}
+            disabled={loading || code.length !== 6}
+            className="w-full h-11 bg-[#2f5496] hover:bg-[#26447d] text-white font-semibold rounded-lg text-[15px] transition-colors"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <KeyRound className="w-4 h-4 mr-2" />}
+            {loading ? 'Vérification…' : 'Valider le code'}
+          </Button>
+
+          <p className="text-center text-sm text-gray-500">
+            Code non reçu ?{' '}
+            <button
+              type="button"
+              onClick={handleRequest}
+              disabled={loading}
+              className="text-[#2f5496] hover:text-[#1d3461] font-semibold transition-colors disabled:opacity-50"
+            >
+              Renvoyer un code
+            </button>
+          </p>
+        </>
+      )}
+
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={() => onSwitch('login')}
+          className="inline-flex items-center gap-1.5 text-sm text-[#2f5496] hover:text-[#1d3461] font-medium transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Retour à la connexion
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  LOGIN                                                              */
 /* ------------------------------------------------------------------ */
 function LoginView({ onSwitch }: { onSwitch: (v: AuthView) => void }) {
@@ -349,6 +493,16 @@ function LoginView({ onSwitch }: { onSwitch: (v: AuthView) => void }) {
       >
         {googleLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <span className="mr-2.5 flex items-center"><GoogleIcon /></span>}
         {googleLoading ? 'Connexion en cours…' : 'Se connecter avec Google'}
+      </Button>
+
+      {/* Connexion par code email (OTP) — méthode alternative */}
+      <Button
+        variant="outline"
+        onClick={() => onSwitch('otp')}
+        className="w-full h-11 rounded-lg border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-[15px] font-medium text-gray-700 transition-all"
+      >
+        <Mail className="w-4 h-4 mr-2.5" />
+        Se connecter par code email
       </Button>
 
       <p className="text-center text-sm text-gray-500 pt-1">
@@ -834,6 +988,7 @@ export function AuthPage() {
 
           <AnimatePresence mode="wait">
             {view === 'login' && <LoginView key="l" onSwitch={switchView} />}
+            {view === 'otp' && <OtpView key="o" onSwitch={switchView} />}
             {view === 'register' && <RegisterView key="r" onSwitch={switchView} />}
             {view === 'forgot' && <ForgotPasswordView key="f" onSwitch={switchView} />}
           </AnimatePresence>

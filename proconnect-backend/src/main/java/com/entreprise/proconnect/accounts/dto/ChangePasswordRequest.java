@@ -8,7 +8,8 @@ import jakarta.validation.constraints.Size;
  * (première connexion du compte bootstrap) : l'utilisateur est déjà authentifié
  * par un JWT valide, exiger l'ancien mot de passe temporaire n'apporte rien.
  */
-public record ChangePasswordRequest(
+public record
+ChangePasswordRequest(
         String oldPassword,
         @NotBlank @Size(min = 10) String newPassword
 ) {

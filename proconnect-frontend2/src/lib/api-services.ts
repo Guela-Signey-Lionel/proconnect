@@ -31,6 +31,10 @@ export const authApi = {
     api.post<void>('/api/v1/auth/change-password/', { oldPassword, newPassword }),
   requestPasswordReset: (email: string) =>
     api.post<void>('/api/v1/auth/password-reset/', { email }),
+  otpRequest: (email: string) =>
+    api.post<void>('/api/v1/auth/otp/request/', { email }),
+  otpVerify: (email: string, code: string) =>
+    api.post<TokenResponse>('/api/v1/auth/otp/verify/', { email, code }),
   confirmPasswordReset: (token: string, newPassword: string) =>
     api.post<void>('/api/v1/auth/password-reset-confirm/', { token, newPassword }),
   deactivate: () => api.post<void>('/api/v1/auth/deactivate/'),

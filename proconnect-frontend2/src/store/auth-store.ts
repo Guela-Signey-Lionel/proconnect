@@ -30,6 +30,8 @@ interface AuthStore {
   isEntering: boolean;
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: (idToken: string) => Promise<void>;
+  /** Connexion par code unique reçu par email (OTP) : étape 2, après otpRequest. */
+  loginWithOtp: (email: string, code: string) => Promise<void>;
   register: (body: { email: string; firstName: string; lastName: string; password: string; phone?: string }) => Promise<void>;
   logout: () => void;
   /** Termine manuellement le splash de bienvenue. */
@@ -68,6 +70,18 @@ export const useAuthStore = create<AuthStore>((set) => ({
     setTokens(tokens.accessToken, tokens.refreshToken);
     const me = await authApi.me();
     set({ isAuthenticated: true, currentUser: userFromResponse(me), isEntering: true });
+    useMessagingStore.getState().initRealtime();
+  },
+
+  loginWithOtp: async (email, code) => {
+    const tokens = await authApi.otpVerify(email, code);
+    setTokens(tokens.accessToken, tokens.refreshToken);
+    const me = await authApi.me();
+    set({
+      isAuthenticated: true,
+      currentUser: userFromResponse(me, tokens.mustChangePassword),
+      isEntering: true,
+    });
     useMessagingStore.getState().initRealtime();
   },
 
