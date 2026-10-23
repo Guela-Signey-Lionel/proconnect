@@ -16,6 +16,7 @@ import {
   Loader2,
   X,
   Check,
+  Reply,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -47,6 +48,8 @@ interface MessageActionsProps {
   hasAttachment: boolean;
   /** Désactive l'édition (ex. pièce jointe non textuelle). */
   canEdit: boolean;
+  /** Répondre directement à ce message : passe la main au ChatView. */
+  onReply?: (message: Message) => void;
 }
 
 export function MessageActions({
@@ -55,6 +58,7 @@ export function MessageActions({
   isSent,
   hasAttachment,
   canEdit,
+  onReply,
 }: MessageActionsProps) {
   const deleteMessage = useMessagingStore((s) => s.deleteMessage);
   const editMessage = useMessagingStore((s) => s.editMessage);
@@ -151,7 +155,9 @@ export function MessageActions({
           <button
             type="button"
             className={cn(
-              'opacity-0 group-hover/msg:opacity-100 focus:opacity-100 transition-opacity h-6 w-6 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-black/10 shrink-0'
+              // Sur mobile (pas de survol) le menu reste TOUJOURS visible :
+              // permet de répondre / copier / transférer au doigt.
+              'md:opacity-0 md:group-hover/msg:opacity-100 focus:opacity-100 transition-opacity h-6 w-6 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-black/10 shrink-0'
             )}
             aria-label="Actions du message"
           >
@@ -159,6 +165,12 @@ export function MessageActions({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align={isSent ? 'end' : 'start'} className="w-48">
+          {onReply && (
+            <DropdownMenuItem onClick={() => onReply(message)}>
+              <Reply className="h-4 w-4 mr-2" />
+              Répondre
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={handleCopy}>
             <Copy className="h-4 w-4 mr-2" />
             Copier

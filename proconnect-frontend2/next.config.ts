@@ -2,7 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  /* config options here */
+  // Pas d'indicateur de dev (badge « Next.js ») en bas de l'application.
+  devIndicators: false,
   typescript: {
     ignoreBuildErrors: true,
   },

@@ -6,7 +6,40 @@ import { mapMessage } from '@/lib/api-mappers';
 import {
   startRealtime, stopRealtime, onNotification, onConversationMessage,
 } from '@/lib/realtime';
+import { playSound } from '@/lib/sounds';
+import {
+  ensureNotificationPermission, showBrowserNotification, updateBrowserTitle,
+} from '@/lib/browser-notifications';
 import { useAuthStore, userFromResponse } from './auth-store';
+
+/* ------------------- Aides notifications « navigateur » -------------------- */
+
+/** Demande la permission de notification système (une seule fois, à la connexion). */
+export function requestBrowserNotificationPermission(): void {
+  void ensureNotificationPermission();
+}
+
+  /** Total de messages non lus (toutes conversations) — du store de messagerie. */
+export function totalUnreadMessages(conversations: Conversation[]): number {
+    return conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
+  }
+
+/**
+ * Déduplique bips et notifications : un même message entrant est poussé par
+ * DEUX canaux (broadcast STOMP de la conversation + /user/queue/notifications).
+ * Le premier arrivé déclenche l'alerte ; le second passe. Fenêtre de 10 s.
+ */
+const recentMessageAlerts = new Map<string, number>();
+function shouldAlertMessage(messageId: string | null | undefined): boolean {
+  if (!messageId) return false;
+  const now = Date.now();
+  for (const [id, ts] of recentMessageAlerts) {
+    if (now - ts > 10_000) recentMessageAlerts.delete(id);
+  }
+  if (recentMessageAlerts.has(messageId)) return false;
+  recentMessageAlerts.set(messageId, now);
+  return true;
+}
 
 /* ============================== Navigation ================================ */
 
@@ -214,7 +247,7 @@ interface MessagingStore {
   chatTab: ChatTab;
   loadConversations: () => Promise<void>;
   openConversation: (conversationId: string) => Promise<void>;
-  sendMessage: (conversationId: string, content: string) => Promise<void>;
+  sendMessage: (conversationId: string, content: string, replyTo?: Message | null) => Promise<void>;
   createGroup: (name: string, participantIds: string[]) => Promise<Conversation>;
   startDirect: (participantId: string) => Promise<Conversation>;
   markRead: (conversationId: string) => Promise<void>;
@@ -265,16 +298,21 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
       }));
       await messagingApi.markRead(conversationId);
       // RAFRAICHIR la liste pour remettre les compteurs à zéro
-      get().loadConversations();
+      // (badge « Messagerie » + compteur dans le titre de l'onglet).
+      await get().loadConversations();
+      updateBrowserTitle(totalUnreadMessages(get().conversations));
     } catch (e) {
       set({ isLoadingMessages: false, error: (e as Error).message });
     }
   },
 
-  sendMessage: async (conversationId, content) => {
+  sendMessage: async (conversationId, content, replyTo) => {
     // Mise à jour optimiste (id temporaire) : le message s'affiche instantanément.
     const tmpId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const currentUser = useAuthStore.getState().currentUser;
+    // Réponse liée : référence réelle au message visé (le texte reste clean,
+    // la citation est rendue par l'UI à partir des champs replyTo*).
+    const replyToId = replyTo?.id ?? null;
     const optimistic: Message = {
       id: tmpId,
       conversationId,
@@ -285,6 +323,11 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
       attachmentName: null,
       attachmentSize: null,
       createdAt: new Date().toISOString(),
+      replyToId,
+      replyToSenderName: replyTo?.sender?.fullName ||
+        `${replyTo?.sender?.firstName ?? ''} ${replyTo?.sender?.lastName ?? ''}`.trim() || null,
+      replyToContent: replyTo?.content ?? null,
+      replyToHasAttachment: !!replyTo?.attachmentUrl,
     };
     set((s) => ({
       messages: {
@@ -293,7 +336,7 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
       },
     }));
     try {
-      const message = await messagingApi.send(conversationId, content);
+      const message = await messagingApi.send(conversationId, content, replyToId);
       set((s) => ({
         messages: {
           ...s.messages,
@@ -426,6 +469,35 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
           c.id === conversationId ? { ...c, lastMessage: incoming } : c
         ),
       }));
+      const isFromMe = incoming.sender?.id === useAuthStore.getState().currentUser?.id;
+      if (!isFromMe) {
+        // Titre de l'onglet : compteur temporaire si la liste des conversations
+        // n'a pas encore été rechargée (la réponse du serveur l'ajustera).
+        updateBrowserTitle(
+          totalUnreadMessages(get().conversations) +
+            (state.activeConversationId === conversationId ? 0 : 1)
+        );
+        // Son « message reçu » + notification système, une seule fois par message
+        // (le broadcast STOMP et la notification push peuvent arriver l'un après
+        // l'autre pour le même message).
+        if (shouldAlertMessage(incoming.id)) {
+          // Même conversation ouverte : le bip retentit, comme sur les messagers
+          // classiques (préférence sound_messageReceived).
+          const prefs = usePreferencesStore.getState();
+          if (prefs.soundEnabled && prefs.soundForMessageReceived) {
+            playSound('message_received', prefs.soundPreset, prefs.soundVolume);
+          }
+          if (state.activeConversationId !== conversationId) {
+            const senderName = incoming.sender?.fullName ??
+              `${incoming.sender?.firstName ?? ''} ${incoming.sender?.lastName ?? ''}`.trim();
+            showBrowserNotification(
+              senderName || 'Nouveau message',
+              incoming.content ?? '📎 Nouvelle pièce jointe',
+              () => useNavigationStore.getState().navigateTo('messaging')
+            );
+          }
+        }
+      }
       // Si la conversation est ouverte et visible → marque comme lu.
       if (state.activeConversationId === conversationId) {
         messagingApi.markRead(conversationId).catch(() => {});
@@ -435,6 +507,13 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
 
   initRealtime: () => {
     startRealtime();
+    // Permission notification système (demandée au plus tôt, une seule fois)
+    requestBrowserNotificationPermission();
+    // Charge les conversations dès l'ouverture de session : alimente le badge
+    // « Messagerie » de la barre latérale et le compteur dans le titre de l'onglet.
+    void get().loadConversations().finally(() => {
+      updateBrowserTitle(totalUnreadMessages(get().conversations));
+    });
     // Notifications push temps réel → store + rafraîchissement conversations
     onNotification((raw: any) => {
       const notification = raw as Notification;
@@ -447,7 +526,24 @@ export const useMessagingStore = create<MessagingStore>((set, get) => ({
       });
       // Un nouveau message peut concerner une conversation pas encore dans la liste.
       if (notification.notificationType === 'NEW_MESSAGE') {
-        get().loadConversations();
+        // Le même message arrive aussi par le broadcast STOMP de la conversation :
+        // son + notification système seulement si ce canal est le premier.
+        if (shouldAlertMessage(notification.objectId ?? notification.id)) {
+          // Son « message reçu » (préférence son_messageReceived).
+          const prefs = usePreferencesStore.getState();
+          if (prefs.soundEnabled && prefs.soundForMessageReceived) {
+            playSound('message_received', prefs.soundPreset, prefs.soundVolume);
+          }
+          showBrowserNotification(
+            notification.actorName || 'Nouveau message',
+            notification.message ?? 'Vous avez un nouveau message.',
+            () => useNavigationStore.getState().navigateTo('messaging')
+          );
+        }
+        // Titre de l'onglet : compteur rafraîchi après rechargement de la liste.
+        void get().loadConversations().finally(() => {
+          updateBrowserTitle(totalUnreadMessages(get().conversations));
+        });
       }
     });
   },
@@ -597,6 +693,8 @@ interface PreferencesStore {
   soundForCallConnect: boolean;
   soundForGroupMessage: boolean;
   soundForLike: boolean;
+  /** Coches d'envoi/lecture sous les messages envoyés (✓ / ✓✓, verts si lu). */
+  messageStatusTicks: boolean;
   themeColorPreset: string;
   backgroundPreset: string;
   darkMode: 'light' | 'dark' | 'system';
@@ -604,6 +702,7 @@ interface PreferencesStore {
   setSoundPreset: (v: string) => void;
   setSoundVolume: (v: number) => void;
   setSoundForType: (type: string, v: boolean) => void;
+  setMessageStatusTicks: (v: boolean) => void;
   setThemeColorPreset: (v: string) => void;
   setBackgroundPreset: (v: string) => void;
   setDarkMode: (v: 'light' | 'dark' | 'system') => void;
@@ -636,6 +735,7 @@ export const usePreferencesStore = create<PreferencesStore>((set) => ({
   soundForCallConnect: true,
   soundForGroupMessage: true,
   soundForLike: true,
+  messageStatusTicks: true,
   themeColorPreset: 'sky',
   backgroundPreset: 'white',
   darkMode: 'light',
@@ -647,6 +747,7 @@ export const usePreferencesStore = create<PreferencesStore>((set) => ({
     localStorage.setItem(`pc_sound_${type}`, String(v));
     set((s) => ({ ...s, [`soundFor${type.charAt(0).toUpperCase() + type.slice(1)}`]: v }));
   },
+  setMessageStatusTicks: (v) => { localStorage.setItem('pc_status_ticks', String(v)); set({ messageStatusTicks: v }); },
   setThemeColorPreset: (v) => { localStorage.setItem('pc_theme_color', v); set({ themeColorPreset: v }); },
   setBackgroundPreset: (v) => { localStorage.setItem('pc_background', v); set({ backgroundPreset: v }); },
   setDarkMode: (v) => { localStorage.setItem('pc_dark_mode', v); set({ darkMode: v }); },
@@ -663,6 +764,7 @@ export const usePreferencesStore = create<PreferencesStore>((set) => ({
       soundForCallConnect: readLSBool('sound_callConnect', true),
       soundForGroupMessage: readLSBool('sound_groupMessage', true),
       soundForLike: readLSBool('sound_like', true),
+      messageStatusTicks: readLSBool('status_ticks', true),
       themeColorPreset: readLS('theme_color', 'sky'),
       backgroundPreset: readLS('background', 'white'),
       darkMode: readLS('dark_mode', 'light') as 'light' | 'dark' | 'system',

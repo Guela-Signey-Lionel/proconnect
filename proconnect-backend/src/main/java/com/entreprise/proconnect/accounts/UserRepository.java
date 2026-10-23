@@ -8,11 +8,12 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface UserRepository extends JpaRepository<User, UUID> {
+public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificationExecutor<User> {
     Optional<User> findByEmail(String email);
 
     /**
@@ -62,31 +63,4 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     long countByLastSeenAtAfter(Instant after);
 
-    /**
-     * Recherche admin : recherche texte (email / prénom / nom) combinée aux filtres
-     * statut, période d'inscription et période de dernière connexion. Tous les
-     * paramètres sont optionnels (null = filtre ignoré).
-     */
-    @Query(
-            """
-            SELECT u FROM User u
-            WHERE (:search IS NULL OR LOWER(u.email) LIKE LOWER(CONCAT('%', :search, '%'))
-                                 OR LOWER(u.firstName) LIKE LOWER(CONCAT('%', :search, '%'))
-                                 OR LOWER(u.lastName) LIKE LOWER(CONCAT('%', :search, '%')))
-              AND (:status IS NULL OR u.status = :status)
-              AND (:registeredFrom IS NULL OR u.createdAt >= :registeredFrom)
-              AND (:registeredTo IS NULL OR u.createdAt <= :registeredTo)
-              AND (:lastLoginFrom IS NULL OR u.lastLoginAt >= :lastLoginFrom)
-              AND (:lastLoginTo IS NULL OR u.lastLoginAt <= :lastLoginTo)
-            """
-    )
-    Page<User> searchAdmin(
-            @Param("search") String search,
-            @Param("status") UserStatus status,
-            @Param("registeredFrom") Instant registeredFrom,
-            @Param("registeredTo") Instant registeredTo,
-            @Param("lastLoginFrom") Instant lastLoginFrom,
-            @Param("lastLoginTo") Instant lastLoginTo,
-            Pageable pageable
-    );
 }

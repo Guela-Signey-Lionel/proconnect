@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { cn, getInitials, timeAgo } from '@/lib/utils';
-import { useMessagingStore, useAuthStore } from '@/store';
+import { useMessagingStore, useAuthStore, useNavigationStore } from '@/store';
 import type { Conversation, User } from '@/types';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +11,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Search,
+  ArrowLeft,
   PenSquare,
   UsersRound,
   MessageSquare,
@@ -54,6 +55,7 @@ export function MessagingPage() {
   const openConversation = useMessagingStore((s) => s.openConversation);
   const setActiveConversation = useMessagingStore((s) => s.setActiveConversation);
   const setChatTab = useMessagingStore((s) => s.setChatTab);
+  const navigateTo = useNavigationStore((s) => s.navigateTo);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -124,16 +126,26 @@ export function MessagingPage() {
           </div>
         </div>
 
-        {/* Search */}
+        {/* Search — flèche de retour vers l'Accueil sur petits écrans */}
         <div className="px-4 pb-2 shrink-0">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Rechercher une discussion..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-10 bg-gray-100 border-none rounded-lg text-sm placeholder:text-gray-400 focus-visible:ring-1 focus-visible:ring-sky-300"
-            />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigateTo('feed')}
+              className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors shrink-0"
+              aria-label="Retour à l'accueil"
+              title="Retour à l'accueil"
+            >
+              <ArrowLeft className="h-5 w-5 text-gray-600" />
+            </button>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Rechercher une discussion..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-10 bg-gray-100 border-none rounded-lg text-sm placeholder:text-gray-400 focus-visible:ring-1 focus-visible:ring-sky-300"
+              />
+            </div>
           </div>
         </div>
 

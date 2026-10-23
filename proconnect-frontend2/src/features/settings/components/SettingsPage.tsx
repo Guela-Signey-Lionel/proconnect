@@ -151,6 +151,9 @@ function NotificationSettingsSection() {
   const [emailNotif, setEmailNotif] = useState(true);
   const [pushNotif, setPushNotif] = useState(true);
   const [inAppNotif, setInAppNotif] = useState(true);
+  // Coches d'envoi/lecture sous les messages envoyés (✓ / ✓✓ → vert si lu).
+  const messageStatusTicks = usePreferencesStore((s) => s.messageStatusTicks);
+  const setMessageStatusTicks = usePreferencesStore((s) => s.setMessageStatusTicks);
 
   return (
     <div className="space-y-4">
@@ -186,6 +189,29 @@ function NotificationSettingsSection() {
               <p className="text-xs text-muted-foreground">Notifications dans l'application</p>
             </div>
             <Switch checked={inAppNotif} onCheckedChange={setInAppNotif} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Conversations : coches d'envoi et de lecture des messages */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Check className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Conversations</h3>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Accusés d'envoi et de lecture</p>
+              <p className="text-xs text-muted-foreground">
+                Affiche un petit indicateur sous vos messages : une coche après
+                l'envoi, deux coches à la livraison, vertes quand le destinataire
+                a lu le message.
+              </p>
+            </div>
+            <Switch checked={messageStatusTicks} onCheckedChange={setMessageStatusTicks} />
           </div>
         </CardContent>
       </Card>

@@ -38,6 +38,9 @@ export const authApi = {
   confirmPasswordReset: (token: string, newPassword: string) =>
     api.post<void>('/api/v1/auth/password-reset-confirm/', { token, newPassword }),
   deactivate: () => api.post<void>('/api/v1/auth/deactivate/'),
+  /** Re-vérifie le mot de passe de la session courante avant d'ouvrir le back-office. */
+  adminVerifyCredentials: (password: string) =>
+    api.post<{ valid: boolean }>('/api/v1/admin/verify-credentials/', { password }),
   googleClientId: () => api.get<{ clientId: string }>('/api/v1/auth/google/client-id/'),
   googleLogin: (idToken: string) =>
     api.post<TokenResponse>('/api/v1/auth/google/login/', { idToken }),
@@ -190,14 +193,18 @@ export const messagingApi = {
     api
       .get<PageResponse<any>>(`/api/v1/messages/conversations/${conversationId}/messages/?page=${page}&size=${size}`)
       .then((r) => ({ ...r, results: r.results.map(mapMessage) })),
-  send: (conversationId: string, content: string) =>
+  send: (conversationId: string, content: string, replyToId?: string | null) =>
     api
-      .post<any>(`/api/v1/messages/conversations/${conversationId}/messages/`, { content })
+      .post<any>(`/api/v1/messages/conversations/${conversationId}/messages/`, {
+        content,
+        replyToId: replyToId ?? undefined,
+      })
       .then(mapMessage),
-  sendWithAttachment: (conversationId: string, file: File, content?: string) => {
+  sendWithAttachment: (conversationId: string, file: File, content?: string, replyToId?: string | null) => {
     const fd = new FormData();
     fd.append('file', file);
     if (content && content.trim()) fd.append('content', content.trim());
+    if (replyToId) fd.append('replyToId', replyToId);
     return api
       .upload<any>(`/api/v1/messages/conversations/${conversationId}/messages/attachment/`, fd)
       .then(mapMessage);

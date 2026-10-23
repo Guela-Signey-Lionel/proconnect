@@ -94,7 +94,8 @@ public class MessagingController {
     public ResponseEntity<MessageResponse> sendMessage(
             @AuthenticationPrincipal User user, @PathVariable UUID id, @RequestBody MessageCreateRequest request
     ) {
-        Message message = messagingService.sendMessage(id, user, request.content(), null);
+        Message message = messagingService.sendMessage(
+                id, user, request.content(), null, null, null, null, request.replyToId());
         return ResponseEntity.status(HttpStatus.CREATED).body(MessageResponse.from(message));
     }
 
@@ -109,7 +110,8 @@ public class MessagingController {
             @AuthenticationPrincipal User user,
             @PathVariable UUID id,
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "content", required = false) String content
+            @RequestParam(value = "content", required = false) String content,
+            @RequestParam(value = "replyToId", required = false) java.util.UUID replyToId
     ) {
         String url = mediaStorageService.upload(file, "messaging");
         Message message = messagingService.sendMessage(
@@ -118,7 +120,8 @@ public class MessagingController {
                 url,
                 MessagingService.classifyAttachment(file.getContentType()),
                 file.getOriginalFilename(),
-                file.getSize()
+                file.getSize(),
+                replyToId
         );
         return ResponseEntity.status(HttpStatus.CREATED).body(MessageResponse.from(message));
     }

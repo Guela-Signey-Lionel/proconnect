@@ -5,6 +5,8 @@ import com.entreprise.proconnect.feed.Comment;
 import com.entreprise.proconnect.feed.CommentRepository;
 import com.entreprise.proconnect.feed.Post;
 import com.entreprise.proconnect.feed.PostRepository;
+import com.entreprise.proconnect.feed.dto.CommentModerationResponse;
+import com.entreprise.proconnect.feed.dto.PostModerationResponse;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -39,9 +41,14 @@ public class AdminModerationService {
 
     /* ------------------------------- Listing ------------------------------- */
 
-    /** Liste les publications pour modération : filtres texte et visibilité. */
+    /**
+     * Liste les publications pour modération, déjà mappées en DTO. Le mapping
+     * (auteur, pièces jointes — associations LAZY) DOIT se faire dans cette
+     * transaction : open-in-view est désactivé, le contrôleur ne peut pas
+     * hydrater ces proxies une fois la transaction fermée (sinon 500).
+     */
     @Transactional(readOnly = true)
-    public Page<Post> listPosts(String search, Boolean hidden, Pageable pageable) {
+    public Page<PostModerationResponse> listPosts(String search, Boolean hidden, Pageable pageable) {
         Specification<Post> spec = Specification.where(null);
         if (search != null) {
             spec = spec.and((root, query, cb) -> cb.like(
@@ -50,12 +57,14 @@ public class AdminModerationService {
         if (hidden != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("hidden"), hidden));
         }
-        return postRepository.findAll(spec, pageable);
+        Page<Post> page = postRepository.findAll(spec, pageable);
+        return page.map(p -> PostModerationResponse.from(
+                p, commentRepository.countByPostIdAndHiddenFalse(p.getId())));
     }
 
-    /** Liste les commentaires pour modération : filtres texte, publication, visibilité. */
+    /** Liste les commentaires pour modération, déjà mappés en DTO (même contrainte LAZY). */
     @Transactional(readOnly = true)
-    public Page<Comment> listComments(String search, UUID postId, Boolean hidden, Pageable pageable) {
+    public Page<CommentModerationResponse> listComments(String search, UUID postId, Boolean hidden, Pageable pageable) {
         Specification<Comment> spec = Specification.where(null);
         if (search != null) {
             spec = spec.and((root, query, cb) -> cb.like(
@@ -67,7 +76,8 @@ public class AdminModerationService {
         if (hidden != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("hidden"), hidden));
         }
-        return commentRepository.findAll(spec, pageable);
+        Page<Comment> page = commentRepository.findAll(spec, pageable);
+        return page.map(CommentModerationResponse::from);
     }
 
     /* ------------------------------ Posts ---------------------------------- */

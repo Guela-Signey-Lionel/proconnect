@@ -190,10 +190,21 @@ export function mapMessage(m: any): Message {
     editedAt: m.editedAt ? isoDate(m.editedAt) : null,
     isDeleted: m.isDeleted ?? false,
     createdAt: isoDate(m.createdAt),
+    replyToId: m.replyToId ?? null,
+    replyToSenderName: m.replyToSenderName ?? null,
+    replyToContent: m.replyToContent ?? null,
+    replyToHasAttachment: m.replyToHasAttachment ?? false,
   };
 }
 
 export function mapConversation(c: any): Conversation {
+  // Accusés de lecture : { "<userId>": "<instant ISO>" } (null si jamais lu).
+  const readReceipts: Record<string, string | null> = {};
+  if (c.readReceipts && typeof c.readReceipts === 'object') {
+    for (const [userId, value] of Object.entries(c.readReceipts)) {
+      readReceipts[userId] = typeof value === 'string' ? isoDate(value) : null;
+    }
+  }
   return {
     id: c.id,
     isGroup: c.isGroup,
@@ -202,6 +213,7 @@ export function mapConversation(c: any): Conversation {
     lastMessage: c.lastMessage ? mapMessage(c.lastMessage) : null,
     unreadCount: c.unreadCount ?? 0,
     createdAt: isoDate(c.createdAt),
+    readReceipts,
   };
 }
 

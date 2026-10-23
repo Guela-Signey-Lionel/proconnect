@@ -12,7 +12,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { cn, getInitials } from '@/lib/utils';
-import { useNavigationStore, useAuthStore, useNotificationStore } from '@/store';
+import { useNavigationStore, useAuthStore, useNotificationStore, useMessagingStore } from '@/store';
 import type { PageView } from '@/types';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -71,6 +71,9 @@ export function LeftSidebar() {
   const currentPage = useNavigationStore((s) => s.currentPage);
   const currentUser = useAuthStore((s) => s.currentUser);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
+  // Badge « Messagerie » : total des messages non lus (toutes conversations).
+  const conversations = useMessagingStore((s) => s.conversations);
+  const unreadMessages = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
   const logout = useAuthStore((s) => s.logout);
 
   if (!currentUser) return null;
@@ -92,6 +95,18 @@ export function LeftSidebar() {
       <nav className="flex-1 px-3 space-y-1 mt-1">
         {navItems.map((item) => {
           const isActive = currentPage === item.page;
+
+          // Badge « Messagerie » : total des messages non lus.
+          if (item.page === 'messaging' && unreadMessages > 0) {
+            return (
+              <div key={item.page} className="relative">
+                <NavButton item={item} isActive={isActive} />
+                <span className="absolute top-1.5 right-1.5 lg:right-auto lg:left-8 flex items-center justify-center size-5 rounded-full bg-sky-600 text-[10px] font-semibold text-white">
+                  {unreadMessages > 99 ? '99+' : unreadMessages}
+                </span>
+              </div>
+            );
+          }
 
           if (item.page === 'notifications' && unreadCount > 0) {
             return (

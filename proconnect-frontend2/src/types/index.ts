@@ -168,6 +168,8 @@ export interface Conversation {
   lastMessage: Message | null;
   unreadCount: number;
   createdAt: string;
+  /** Accusés de lecture : userId → dernier instant où ce participant a lu la conversation. */
+  readReceipts?: Record<string, string | null>;
 }
 
 /** Récapitulatif des médias/liens/documents d'une conversation (calculé côté client). */
@@ -192,6 +194,11 @@ export interface Message {
   editedAt?: string | null;
   isDeleted?: boolean;
   createdAt: string;
+  /** Réponse liée : référence réelle au message visé (jamais copiée dans le texte). */
+  replyToId?: string | null;
+  replyToSenderName?: string | null;
+  replyToContent?: string | null;
+  replyToHasAttachment?: boolean;
 }
 
 export interface Job {

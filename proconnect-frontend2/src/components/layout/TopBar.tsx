@@ -1,8 +1,8 @@
 'use client';
 
-import { Search, Bell, Building2 } from 'lucide-react';
+import { Search, Bell, Building2, MessageSquare } from 'lucide-react';
 import { getInitials } from '@/lib/utils';
-import { useNavigationStore, useAuthStore, useNotificationStore, useSearchStore } from '@/store';
+import { useNavigationStore, useAuthStore, useNotificationStore, useSearchStore, useMessagingStore, totalUnreadMessages } from '@/store';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -17,6 +17,10 @@ import { Button } from '@/components/ui/button';
 export function TopBar() {
   const currentUser = useAuthStore((s) => s.currentUser);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
+  // Badge « messages reçus » : total des messages non lus (toutes conversations),
+  // identique au badge de la barre latérale — accumulé en temps réel.
+  const conversations = useMessagingStore((s) => s.conversations);
+  const unreadMessages = totalUnreadMessages(conversations);
   const navigateTo = useNavigationStore((s) => s.navigateTo);
   const setIsSearchOpen = useSearchStore((s) => s.setIsSearchOpen);
   const logout = useAuthStore((s) => s.logout);
@@ -44,6 +48,21 @@ export function TopBar() {
             aria-label="Rechercher"
           >
             <Search className="size-5" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative size-9"
+            onClick={() => navigateTo('messaging')}
+            aria-label="Messagerie"
+          >
+            <MessageSquare className="size-5" />
+            {unreadMessages > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-sky-600 text-[10px] font-semibold text-white">
+                {unreadMessages > 99 ? '99+' : unreadMessages}
+              </span>
+            )}
           </Button>
 
           <Button

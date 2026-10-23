@@ -9,6 +9,7 @@ import { RightSidebar } from '@/components/layout/RightSidebar';
 import { AuthPage } from '@/features/auth/components';
 import { MustChangePasswordScreen } from '@/features/auth/components/MustChangePasswordScreen';
 import { AdminAccessGate } from '@/features/auth/components/AdminAccessGate';
+import { AdminAuthGate, isAdminUnlocked } from '@/features/auth/components/AdminAuthGate';
 import { FeedList } from '@/features/feed';
 import { ProfilePage } from '@/features/profile';
 import { NetworkPage } from '@/features/network';
@@ -35,6 +36,12 @@ export default function Home() {
   const backgroundPreset = usePreferencesStore((s) => s.backgroundPreset);
   const darkMode = usePreferencesStore((s) => s.darkMode);
   const canOpenAdmin = !!currentUser && (currentUser.isAdmin || currentUser.isModerator);
+
+  // Déverrouillage du back-office (re-saisie des identifiants admin). La valeur
+  // est relue à chaque rendu : elle reflète instantanément la saisie réussie.
+  // (Lecture de sessionStorage uniquement quand la porte est atteinte — jamais
+  // pendant le pré-rendu serveur, où currentPage vaut 'feed'.)
+  const [, setAdminUnlockTick] = useState(0);
 
   // Restaure la session (JWT stocké) + les préférences au premier montage.
   useEffect(() => {
@@ -96,6 +103,13 @@ export default function Home() {
   // encore, le premier se crée via POST /api/v1/admin/bootstrap/.
   if (currentPage === 'admin' && !canOpenAdmin) {
     return <AdminAccessGate />;
+  }
+
+  // Second verrou : l'admin doit ressaisir ses identifiants pour ouvrir le
+  // back-office (mode « sudo » — vérifiés côté serveur via
+  // POST /api/v1/admin/verify-credentials/).
+  if (currentPage === 'admin' && canOpenAdmin && !isAdminUnlocked(currentUser?.id)) {
+    return <AdminAuthGate onUnlocked={() => setAdminUnlockTick((t) => t + 1)} />;
   }
 
   const isMessaging = currentPage === 'messaging';

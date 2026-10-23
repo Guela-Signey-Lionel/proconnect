@@ -214,7 +214,7 @@ public class MessagingService {
 
     @Transactional
     public Message sendMessage(UUID conversationId, User sender, String content, String attachmentUrl) {
-        return sendMessage(conversationId, sender, content, attachmentUrl, null, null, null);
+        return sendMessage(conversationId, sender, content, attachmentUrl, null, null, null, null);
     }
 
     /** Envoi direct par destinataire : crée (ou réutilise) la conversation 1-1 si besoin. */
@@ -226,18 +226,33 @@ public class MessagingService {
 
     /**
      * Envoi d'un message avec pièce jointe optionnelle (image, vidéo, audio/vocal,
-     * document — tout format). Diffusion temps réel via STOMP + notifications push.
+     * document — tout format) et référence de réponse optionnelle. Diffusion temps
+     * réel via STOMP + notifications push.
      */
     @Transactional
     public Message sendMessage(
             UUID conversationId, User sender, String content, String attachmentUrl,
-            String attachmentType, String attachmentName, Long attachmentSize
+            String attachmentType, String attachmentName, Long attachmentSize, UUID replyToId
     ) {
         assertParticipant(conversationId, sender);
         // Un compte suspendu ou banni ne peut plus envoyer de messages.
         com.entreprise.proconnect.accounts.UserGuard.assertCanInteract(sender);
         if ((content == null || content.isBlank()) && (attachmentUrl == null || attachmentUrl.isBlank())) {
             throw new BusinessRuleException("Un message doit contenir du texte ou une pièce jointe.");
+        }
+
+        // Réponse liée : le message visé doit exister, être dans LA MÊME conversation
+        // et ne pas être supprimé. La citation ne voyage pas dans le texte.
+        Message replyTo = null;
+        if (replyToId != null) {
+            replyTo = messageRepository.findById(replyToId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Message visé introuvable."));
+            if (!replyTo.getConversation().getId().equals(conversationId)) {
+                throw new BusinessRuleException("Le message visé n'appartient pas à cette conversation.");
+            }
+            if (replyTo.isDeleted()) {
+                throw new BusinessRuleException("Impossible de répondre à un message supprimé.");
+            }
         }
 
         Conversation conversation = getById(conversationId);
@@ -250,6 +265,7 @@ public class MessagingService {
                         .attachmentType(attachmentType)
                         .attachmentName(attachmentName)
                         .attachmentSize(attachmentSize)
+                        .replyTo(replyTo)
                         .build()
         );
 
@@ -333,6 +349,13 @@ public class MessagingService {
                         ? messageRepository.countByConversationIdAndSenderNotAndCreatedAtAfter(attached.getId(), currentUser, p.getLastReadAt())
                         : messageRepository.countByConversationIdAndSenderNot(attached.getId(), currentUser))
                 .orElse(0L);
-        return ConversationResponse.of(attached, participants, last != null ? MessageResponse.from(last) : null, unread);
+        // Accusés de lecture : dernier instant où chaque participant a consulté la
+        // conversation (base des coches ✓/✓✓ côté frontend). HashMap : lastReadAt
+        // peut être null (participant n'ayant jamais ouvert la conversation).
+        Map<UUID, Instant> readReceipts = new java.util.HashMap<>();
+        for (ConversationParticipant p : attached.getParticipants()) {
+            readReceipts.put(p.getUser().getId(), p.getLastReadAt());
+        }
+        return ConversationResponse.of(attached, participants, last != null ? MessageResponse.from(last) : null, unread, readReceipts);
     }
 }

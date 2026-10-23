@@ -9,10 +9,6 @@ import com.entreprise.proconnect.accounts.dto.WarningRequest;
 import com.entreprise.proconnect.common.PageResponse;
 import com.entreprise.proconnect.common.exception.BusinessRuleException;
 import com.entreprise.proconnect.common.exception.ResourceNotFoundException;
-import com.entreprise.proconnect.feed.Comment;
-import com.entreprise.proconnect.feed.CommentRepository;
-import com.entreprise.proconnect.feed.Post;
-import com.entreprise.proconnect.feed.PostRepository;
 import com.entreprise.proconnect.feed.dto.CommentModerationResponse;
 import com.entreprise.proconnect.feed.dto.PostModerationResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -25,6 +21,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -47,23 +44,20 @@ public class AdminController {
     private final AdminService adminService;
     private final AdminModerationService moderationService;
     private final AdminActionRepository actionRepository;
-    private final PostRepository postRepository;
-    private final CommentRepository commentRepository;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     public AdminController(
             UserRepository userRepository,
             AdminService adminService,
             AdminModerationService moderationService,
             AdminActionRepository actionRepository,
-            PostRepository postRepository,
-            CommentRepository commentRepository
+            org.springframework.security.crypto.password.PasswordEncoder passwordEncoder
     ) {
         this.userRepository = userRepository;
         this.adminService = adminService;
         this.moderationService = moderationService;
         this.actionRepository = actionRepository;
-        this.postRepository = postRepository;
-        this.commentRepository = commentRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     /* --------------------------- Création Admin ----------------------------- */
@@ -78,6 +72,37 @@ public class AdminController {
     public ResponseEntity<UserResponse> bootstrapAdmin(@Valid @RequestBody AdminCreateRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(UserResponse.from(adminService.createAdmin(request)));
+    }
+
+    /* --------------------- Re-vérification identifiants --------------------- */
+
+    /**
+     * Porte d'entrée « sudo » du back-office : vérifie le mot de passe de la
+     * session ADMIN / MODERATOR courante avant d'ouvrir l'interface
+     * d'administration (double contrôle d'identité, même session JWT).
+     */
+    @PostMapping("/verify-credentials/")
+    @PreAuthorize("hasAnyRole('ADMIN','MODERATOR')")
+    @Operation(summary = "Vérifier le mot de passe de la session courante avant d'ouvrir le back-office")
+    public VerifyCredentialsResponse verifyCredentials(
+            @AuthenticationPrincipal User admin,
+            @RequestBody VerifyCredentialsRequest request
+    ) {
+        if (request == null || request.password() == null || request.password().isBlank()) {
+            return new VerifyCredentialsResponse(false);
+        }
+        boolean valid = passwordEncoder.matches(request.password(), admin.getPassword());
+        if (!valid) {
+            org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AdminController.class);
+            log.warn("Re-vérification d'identifiants ÉCHOUÉE pour {} sur le back-office.", admin.getEmail());
+        }
+        return new VerifyCredentialsResponse(valid);
+    }
+
+    public record VerifyCredentialsRequest(String password) {
+    }
+
+    public record VerifyCredentialsResponse(boolean valid) {
     }
 
     /* ------------------------------ Listing -------------------------------- */
@@ -230,9 +255,7 @@ public class AdminController {
     ) {
         Pageable sorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
                 Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<Post> page = moderationService.listPosts(blankToNull(search), hidden, sorted);
-        return PageResponse.from(page.map(p -> PostModerationResponse.from(
-                p, commentRepository.countByPostIdAndHiddenFalse(p.getId()))));
+        return PageResponse.from(moderationService.listPosts(blankToNull(search), hidden, sorted));
     }
 
     /** Commentaires visibles / masqués, filtrables par publication. */
@@ -247,8 +270,7 @@ public class AdminController {
     ) {
         Pageable sorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
                 Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<Comment> page = moderationService.listComments(blankToNull(search), postId, hidden, sorted);
-        return PageResponse.from(page.map(CommentModerationResponse::from));
+        return PageResponse.from(moderationService.listComments(blankToNull(search), postId, hidden, sorted));
     }
 
     /** Masque une publication (reversible) — équivaut à un signalement traité. */
@@ -320,7 +342,11 @@ public class AdminController {
     ) {
         Pageable sorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
                 Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<AdminAction> page = actionRepository.search(actorId, targetUserId, actionType, sorted);
+        Specification<AdminAction> spec = Specification.where(null);
+        if (actorId != null) spec = spec.and(AdminActionSpecs.byActor(actorId));
+        if (targetUserId != null) spec = spec.and(AdminActionSpecs.byTarget(targetUserId));
+        if (actionType != null) spec = spec.and(AdminActionSpecs.byType(actionType));
+        Page<AdminAction> page = actionRepository.findAll(spec, sorted);
         return PageResponse.from(page.map(AdminActionResponse::from));
     }
 

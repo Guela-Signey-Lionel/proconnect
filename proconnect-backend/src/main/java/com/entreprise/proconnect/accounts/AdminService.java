@@ -127,10 +127,10 @@ public class AdminService {
             LocalDate lastLoginFrom, LocalDate lastLoginTo,
             Pageable pageable
     ) {
-        return userRepository.searchAdmin(
-                blankToNull(search), status,
-                startOfDay(registeredFrom), endOfDay(registeredTo),
-                startOfDay(lastLoginFrom), endOfDay(lastLoginTo),
+        return userRepository.findAll(
+                AdminUserSpecs.adminSearch(
+                        search, status, startOfDay(registeredFrom), endOfDay(registeredTo),
+                        startOfDay(lastLoginFrom), endOfDay(lastLoginTo)),
                 pageable
         );
     }

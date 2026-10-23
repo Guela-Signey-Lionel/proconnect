@@ -59,4 +59,13 @@ public class Message extends BaseEntity {
     @Column(name = "is_deleted", nullable = false)
     @lombok.Builder.Default
     private boolean isDeleted = false;
+
+    /**
+     * Message auquel celui-ci répond (null sinon). Référence réelle en base :
+     * la citation ne voyage PAS dans le texte, elle est rendue par le client
+     * à partir de cette association.
+     */
+    @ManyToOne
+    @JoinColumn(name = "reply_to_id")
+    private Message replyTo;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { cn, getInitials } from '@/lib/utils';
 import { useMessagingStore, useAuthStore } from '@/store';
 import type { Conversation, Message } from '@/types';
@@ -8,7 +8,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Send, Loader2, Paperclip, X, Ban } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Paperclip, X, Ban, Reply } from 'lucide-react';
 import { otherParticipant } from './MessagingPage';
 import { MessageAttachment } from './MessageAttachment';
 import { EmojiPickerButton } from './EmojiPicker';
@@ -18,6 +18,8 @@ import { ImageLightbox } from './ImageLightbox';
 import { ConversationInfoMenu, chatThemeClasses } from './ConversationInfoMenu';
 import { OnlineIndicator } from '@/components/ui/online-indicator';
 import { useIsOnline } from '@/hooks/use-presence';
+import { MessageStatusTicks, computeMessageTickState } from './MessageStatusTicks';
+import { usePreferencesStore } from '@/store';
 
 interface ChatViewProps {
   conversation: Conversation;
@@ -44,6 +46,8 @@ function formatDateSeparator(dateStr: string): string {
 
 export function ChatView({ conversation, onBack }: ChatViewProps) {
   const currentUser = useAuthStore((s) => s.currentUser);
+  // Préférence utilisateur : affichage des coches sous les messages envoyés.
+  const statusTicksEnabled = usePreferencesStore((s) => s.messageStatusTicks);
   const messages = useMessagingStore((s) =>
     conversation.id ? (s.messages[conversation.id] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES
   );
@@ -56,8 +60,14 @@ export function ChatView({ conversation, onBack }: ChatViewProps) {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  // Thème de la discussion (personnalisable via le menu burger).
-  const [theme, setTheme] = useState({ sent: 'bg-sky-500', sentHover: 'hover:bg-sky-600' });
+  // Thème de la discussion (personnalisable via le menu burger) — dérivé de
+  // l'id de conversation (useMemo, pas d'effect qui re-déclencherait un rendu).
+  const theme = useMemo(
+    () => chatThemeClasses(conversation.id),
+    [conversation.id]
+  );
+  // Message auquel on répond (aperçu au-dessus du champ de saisie, badge « Réponse »).
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,11 +86,6 @@ export function ChatView({ conversation, onBack }: ChatViewProps) {
     if (!conversation.id) return;
     return subscribeRealtime(conversation.id);
   }, [conversation.id, subscribeRealtime]);
-
-  // Applique le thème (couleur des bulles) choisi pour cette conversation.
-  useEffect(() => {
-    setTheme(chatThemeClasses(conversation.id));
-  }, [conversation.id]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -110,14 +115,16 @@ export function ChatView({ conversation, onBack }: ChatViewProps) {
     if (!content) return;
     setIsSending(true);
     try {
-      await sendMessage(conversation.id, content);
+      await sendMessage(conversation.id, content, replyTo);
+      // La réponse est partie : on retire l'aperçu.
+      setReplyTo(null);
       setText('');
     } catch {
       /* silencieux */
     } finally {
       setIsSending(false);
     }
-  }, [text, isSending, uploadProgress, pendingFile, conversation.id, sendMessage, sendAttachment]);
+  }, [text, isSending, uploadProgress, pendingFile, conversation.id, sendMessage, sendAttachment, replyTo]);
 
   const handleSendVoice = useCallback(async (file: File) => {
     await sendAttachment(conversation.id, file);
@@ -218,6 +225,7 @@ export function ChatView({ conversation, onBack }: ChatViewProps) {
                         isSent={isSent}
                         hasAttachment={hasAttachment}
                         canEdit={canEdit}
+                        onReply={setReplyTo}
                       />
                     )}
                     <div className={cn('flex flex-col max-w-[75%]', isSent ? 'items-end' : 'items-start')}>
@@ -242,6 +250,25 @@ export function ChatView({ conversation, onBack }: ChatViewProps) {
                           </div>
                         ) : (
                           <>
+                            {/* Réponse liée : citation rendue à partir de la RÉFÉRENCE
+                                du message visé (pas du texte copié). */}
+                            {msg.replyToId && (
+                              <div
+                                className={cn(
+                                  'mb-1 rounded-md border-l-[3px] px-2 py-1 text-[12px] leading-snug',
+                                  isSent
+                                    ? 'border-white/70 bg-white/10 text-white/90'
+                                    : 'border-sky-500 bg-sky-50/70 text-gray-600'
+                                )}
+                              >
+                                <p className="font-semibold text-[11px] truncate">
+                                  {msg.replyToSenderName || 'Message'}
+                                </p>
+                                <p className="truncate">
+                                  {msg.replyToContent || (msg.replyToHasAttachment ? '📎 Pièce jointe' : '')}
+                                </p>
+                              </div>
+                            )}
                             {hasAttachment && (
                               <div className="mb-1">
                                 <MessageAttachment
@@ -258,9 +285,18 @@ export function ChatView({ conversation, onBack }: ChatViewProps) {
                           <span className="block text-right text-[10px] opacity-60 mt-0.5 px-1">modifié</span>
                         )}
                       </div>
-                      <span className="text-[10px] text-gray-400 mt-0.5 px-1">
-                        {formatTime(msg.createdAt)}
-                      </span>
+                      {isSent && !isDeletedMsg && statusTicksEnabled ? (
+                        <span className="flex items-center gap-1 text-[10px] text-gray-400 mt-0.5 px-1">
+                          {formatTime(msg.createdAt)}
+                          <MessageStatusTicks
+                            state={computeMessageTickState(msg, conversation, currentUser?.id ?? '')}
+                          />
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-gray-400 mt-0.5 px-1">
+                          {formatTime(msg.createdAt)}
+                        </span>
+                      )}
                     </div>
                     {/* Menu 3 points — à droite pour les messages reçus */}
                     {!isSent && (
@@ -270,6 +306,7 @@ export function ChatView({ conversation, onBack }: ChatViewProps) {
                         isSent={isSent}
                         hasAttachment={hasAttachment}
                         canEdit={canEdit}
+                        onReply={setReplyTo}
                       />
                     )}
                   </div>
@@ -302,6 +339,32 @@ export function ChatView({ conversation, onBack }: ChatViewProps) {
               onClick={() => setPendingFile(null)}
               className="text-gray-400 hover:text-red-500 transition-colors shrink-0"
               aria-label="Retirer le fichier"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Aperçu de la réponse en cours (choisi via « Répondre ») ===== */}
+      {replyTo && (
+        <div className="bg-white border-t px-3 pt-2 shrink-0">
+          <div className="flex items-start gap-2 rounded-lg border-l-4 border-sky-500 bg-sky-50/60 px-3 py-2">
+            <Reply className="h-4 w-4 text-sky-600 mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold text-sky-700 truncate">
+                Réponse à {replyTo.sender?.fullName ||
+                  `${replyTo.sender?.firstName ?? ''} ${replyTo.sender?.lastName ?? ''}`}:
+              </p>
+              <p className="text-xs text-gray-600 truncate">
+                {replyTo.content || '📎 Pièce jointe'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplyTo(null)}
+              className="text-gray-400 hover:text-gray-600 transition-colors shrink-0"
+              aria-label="Annuler la réponse"
             >
               <X className="h-4 w-4" />
             </button>

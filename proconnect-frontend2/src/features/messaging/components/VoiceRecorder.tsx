@@ -37,6 +37,14 @@ export function VoiceRecorder({ onSend, disabled }: VoiceRecorderProps) {
 
   const start = async () => {
     try {
+      // Demande l'accès au microphone (permission navigateur) puis enregistre.
+      if (!navigator.mediaDevices?.getUserMedia) {
+        alert(
+          "L'enregistrement vocal n'est pas disponible dans ce navigateur. " +
+            "L'accès au microphone nécessite une connexion sécurisée (https:// ou localhost)."
+        );
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -58,9 +66,16 @@ export function VoiceRecorder({ onSend, disabled }: VoiceRecorderProps) {
       setState('recording');
       setSeconds(0);
       timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
-    } catch {
-      // Micro refusé ou indisponible — silencieux mais visible via l'état inchangé.
-      alert("Impossible d'accéder au microphone. Vérifiez les autorisations du navigateur.");
+    } catch (e) {
+      // Permission refusée (NotAllowedError) ou aucun micro (NotFoundError).
+      const denied = (e as DOMException)?.name === 'NotAllowedError';
+      alert(
+        denied
+          ? "Accès au microphone refusé. Autorisez le micro pour ce site " +
+              "(icône 🔒 dans la barre d'adresse → Autorisations → Microphone : Autoriser), puis réessayez."
+          : "Impossible d'accéder au microphone : vérifiez qu'un micro est branché " +
+              "et que le site est servi en https:// (ou localhost)."
+      );
     }
   };
 
