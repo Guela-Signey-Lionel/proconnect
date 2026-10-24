@@ -1,0 +1,196 @@
+# Blueprint Render — ProConnect (monorepo: proconnect-backend + proconnect-frontend2)
+#
+# Correspondance avec docker-compose local :
+#   db       -> Render Postgres (plan gratuit, expire après 30 jours)
+#   redis    -> Render Key Value (plan gratuit, en mémoire)
+#   minio    -> service MinIO sur Render (plan payant + disque persistant)
+#   rabbitmq -> PAS de RabbitMQ sur Render (le backend démarre quand même,
+#               seules les tâches asynchrones via RabbitMQ sont dégradées)
+#   mailpit  -> remplacé par un fournisseur SMTP transactionnel (variables EMAIL_*)
+#
+# Secrets : les variables marquées sync:false vous seront demandées une seule
+# fois pendant la création du Blueprint dans le dashboard Render.
+# NB : STORAGE_ACCESS_KEY/STORAGE_SECRET_KEY doivent reprendre EXACTEMENT les
+# mêmes valeurs que MINIO_ROOT_USER/MINIO_ROOT_PASSWORD.
+#
+# Budget : services backend + frontend gratuits (mise en veille après 15 min
+# d'inactivité), Postgres + Key Value gratuits, MinIO payant.
+
+previews:
+  generation: "off"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Backend Spring Boot (Docker, gratuit)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: proconnect-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: proconnect-backend/Dockerfile
+    dockerContext: proconnect-backend
+    healthCheckPath: /actuator/health
+    autoDeployTrigger: commit
+    envVars:
+      # Conversion automatique (par render-entrypoint.sh) :
+      #   DATABASE_URL (postgresql://...) -> SPRING_DATASOURCE_URL (jdbc:...)
+      #   REDIS_URL (redis://...)         -> REDIS_HOST / REDIS_PORT / REDIS_PASSWORD
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+
+      # --- Base de données (Render Postgres, réseau privé) ---
+      - key: DATABASE_URL
+        fromDatabase:
+          name: proconnect-db
+          property: connectionString
+      - key: DATABASE_USERNAME
+        fromDatabase:
+          name: proconnect-db
+          property: user
+      - key: DATABASE_PASSWORD
+        fromDatabase:
+          name: proconnect-db
+          property: password
+
+      # --- Redis (Render Key Value, réseau privé) ---
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: proconnect-redis
+          property: connectionString
+
+      # --- Stockage fichiers (MinIO sur Render) ---
+      - key: STORAGE_HOST
+        fromService:
+          type: web
+          name: proconnect-minio
+          property: host
+      - key: STORAGE_PORT
+        value: "10000"
+      - key: STORAGE_BUCKET
+        value: proconnect
+      # URL publique vue par le navigateur (https://proconnect-minio-xxxx.onrender.com)
+      - key: STORAGE_PUBLIC_BASE_URL
+        fromService:
+          type: web
+          name: proconnect-minio
+          envVarKey: RENDER_EXTERNAL_URL
+      # Les DEUX doivent correspondre à MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
+      - key: STORAGE_ACCESS_KEY
+        sync: false
+      - key: STORAGE_SECRET_KEY
+        sync: false
+
+      # --- CORS : origine publique du frontend, injectée automatiquement ---
+      - key: CORS_ALLOWED_ORIGINS
+        fromService:
+          type: web
+          name: proconnect-frontend
+          envVarKey: RENDER_EXTERNAL_URL
+
+      # --- E-mails transactionnels (placeholders à remplir via un provider SMTP) ---
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USERNAME
+        sync: false
+      - key: EMAIL_PASSWORD
+        sync: false
+      - key: EMAIL_SMTP_AUTH
+        value: "true"
+      - key: EMAIL_SMTP_STARTTLS
+        value: "true"
+      - key: MAIL_FROM
+        sync: false
+
+      # --- Divers ---
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OTP_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL_MINUTES
+        value: "30"
+      - key: JWT_REFRESH_TTL_DAYS
+        value: "7"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      # Instance gratuite = 512 Mo : on borne le tas de la JVM
+      - key: JAVA_TOOL_OPTIONS
+        value: "-XX:MaxRAMPercentage=75.0"
+
+  # ---------------------------------------------------------------------------
+  # Frontend Next.js (runtime Node natif, gratuit)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: proconnect-frontend
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: proconnect-frontend2
+    buildCommand: npm install --no-audit --no-fund && npm run build
+    startCommand: HOSTNAME=0.0.0.0 node .next/standalone/server.js
+    healthCheckPath: /
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      # URL publique du backend, injectée au build (variable NEXT_PUBLIC)
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: proconnect-api
+          envVarKey: RENDER_EXTERNAL_URL
+      # Prisma n'est pas utilisé à l'éxécution dans cette app (l'API passe par
+      # le backend Spring) : valeur neutre pour satisfaire la génération du client.
+      - key: DATABASE_URL
+        value: "file:./dev.db"
+
+  # ---------------------------------------------------------------------------
+  # Redis (Render Key Value, gratuit, en mémoire uniquement)
+  # ---------------------------------------------------------------------------
+  - type: keyvalue
+    name: proconnect-redis
+    plan: free
+    region: oregon
+    # Aucun accès public : uniquement le réseau interne Render
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+    persistenceMode: "off"
+
+  # ---------------------------------------------------------------------------
+  # MinIO API/S3 (service public avec disque persistant — plan payant)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: proconnect-minio
+    runtime: image
+    plan: 0.5c-512mb
+    region: oregon
+    image:
+      url: docker.io/minio/minio:latest
+    dockerCommand: server /data --address ":10000" --console-address ":9001"
+    healthCheckPath: /minio/health/live
+    disk:
+      name: proconnect-minio-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      # À reporter aussi dans STORAGE_ACCESS_KEY / STORAGE_SECRET_KEY du backend
+      - key: MINIO_ROOT_USER
+        sync: false
+      - key: MINIO_ROOT_PASSWORD
+        sync: false
+
+databases:
+  # ---------------------------------------------------------------------------
+  # Postgres managé (gratuit — expire 30 jours après création, sauvegardes absentes)
+  # ---------------------------------------------------------------------------
+  - name: proconnect-db
+    plan: free
+    region: oregon
+    databaseName: proconnect-db
+    user: proconnect
+    postgresMajorVersion: "16"

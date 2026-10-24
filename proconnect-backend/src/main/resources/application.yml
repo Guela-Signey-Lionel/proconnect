@@ -31,6 +31,7 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
 
   cache:
     type: redis
@@ -46,6 +47,11 @@ spring:
     port: ${EMAIL_PORT:1025}
     username: ${EMAIL_USERNAME:}
     password: ${EMAIL_PASSWORD:}
+    properties:
+      # Authentification + STARTTLS activés par un fournisseur SMTP réel
+      # (Render bloque l'envoi SMTP direct ; utiliser un service transactionnel).
+      mail.smtp.auth: ${EMAIL_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${EMAIL_SMTP_STARTTLS:false}
 
   servlet:
     multipart:
@@ -93,7 +99,9 @@ proconnect:
     mail-from: ${MAIL_FROM:${EMAIL_FROM:}}
 
   storage:
-    endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
+    # Sur Render : STORAGE_HOST/STORAGE_PORT pointent vers le service MinIO sur
+    # le réseau privé Render. En local : http://localhost:9000 par défaut.
+    endpoint: ${STORAGE_ENDPOINT:http://${STORAGE_HOST:localhost}:${STORAGE_PORT:9000}}
     access-key: ${STORAGE_ACCESS_KEY:minioadmin}
     secret-key: ${STORAGE_SECRET_KEY:minioadmin}
     bucket: ${STORAGE_BUCKET:proconnect}

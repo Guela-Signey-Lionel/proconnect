@@ -16,7 +16,8 @@ RUN useradd --create-home --uid 1000 appuser
 WORKDIR /app
 
 COPY --from=builder /build/target/proconnect.jar app.jar
-RUN chown appuser:appuser app.jar
+COPY render-entrypoint.sh /app/render-entrypoint.sh
+RUN chown appuser:appuser app.jar /app/render-entrypoint.sh && chmod 0755 /app/render-entrypoint.sh
 
 USER appuser
 
@@ -25,4 +26,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8080/actuator/health || exit 1
 
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+ENTRYPOINT ["/app/render-entrypoint.sh"]
